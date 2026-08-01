@@ -1,0 +1,30 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - vendor/pestphp/pest/extension.neon
+
+parameters:
+    # Phase 1 baseline. Phase 7 raises this to 7 — do not add ignores to get
+    # there early; fix the types instead.
+    level: 6
+
+    paths:
+        - app
+        - bootstrap
+        - config
+        - database
+        - routes
+        - tests
+
+    excludePaths:
+        analyseAndScan:
+            # Pest binds $this inside test closures to the extended TestCase at
+            # runtime; PHPStan sees Pest\PendingCalls\TestCall and reports every
+            # $this->getJson() as an undefined method. The fix is
+            # pestphp/pest-plugin-phpstan, which requires Pest 5 and therefore
+            # PHPUnit 13, while Laravel 13 pins PHPUnit 12. Revisit when that
+            # lands — tracked in docs/tech-debt.md. Test-support classes below
+            # these directories are real classes and stay analysed.
+            - tests/Feature
+            - tests/Unit
+
+    tmpDir: storage/framework/cache/phpstan

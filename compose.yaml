@@ -1,0 +1,132 @@
+name: laremit
+
+# Three Redis instances, not three databases on one instance. The reasoning —
+# blast radius, eviction policy, and durability all differ per workload — is in
+# docs/adr/0002-redis-topology-and-eviction-policy.md.
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/app/Dockerfile
+    args:
+      UID: ${UID:-1000}
+      GID: ${GID:-1000}
+  image: laremit/app:dev
+  restart: unless-stopped
+  volumes:
+    - .:/app
+  depends_on:
+    mysql:
+      condition: service_healthy
+    redis-cache:
+      condition: service_healthy
+    redis-queue:
+      condition: service_healthy
+    redis-stream:
+      condition: service_healthy
+
+services:
+  app:
+    <<: *app
+    environment:
+      SERVER_NAME: ':8080'
+    ports:
+      - '${APP_PORT:-8100}:8080'
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:8080/up']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  horizon:
+    <<: *app
+    command: ['php', 'artisan', 'horizon']
+    stop_signal: SIGTERM
+    stop_grace_period: 60s
+    healthcheck:
+      test: ['CMD', 'php', 'artisan', 'horizon:status']
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 30s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+      redis-stream:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-laremit}
+      MYSQL_USER: ${DB_USERNAME:-laremit}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+    ports:
+      - '${DB_PORT_HOST:-33100}:3306'
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/my.cnf:/etc/mysql/conf.d/laremit.cnf:ro
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-uroot', '-p${DB_ROOT_PASSWORD:-root}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis-cache:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ['redis-server', '/etc/redis/redis.conf']
+    ports:
+      - '${REDIS_CACHE_PORT_HOST:-6301}:6379'
+    volumes:
+      - ./docker/redis/cache.conf:/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-queue:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ['redis-server', '/etc/redis/redis.conf']
+    ports:
+      - '${REDIS_QUEUE_PORT_HOST:-6302}:6379'
+    volumes:
+      - redis-queue-data:/data
+      - ./docker/redis/queue.conf:/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-stream:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ['redis-server', '/etc/redis/redis.conf']
+    ports:
+      - '${REDIS_STREAM_PORT_HOST:-6303}:6379'
+    volumes:
+      - redis-stream-data:/data
+      - ./docker/redis/stream.conf:/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mysql-data:
+  redis-queue-data:
+  redis-stream-data:

@@ -1,0 +1,31 @@
+{
+	{$CADDY_GLOBAL_OPTIONS}
+
+	frankenphp {
+		# Phase 8 flips this on without touching the image:
+		#   FRANKENPHP_CONFIG="worker ./public/frankenphp-worker.php"
+		{$FRANKENPHP_CONFIG}
+	}
+
+	# TLS is terminated upstream in every environment we target, and persisting
+	# Caddy state would require a writable volume for no benefit.
+	auto_https off
+	admin off
+	persist_config off
+}
+
+{$CADDY_EXTRA_CONFIG}
+
+{$SERVER_NAME:localhost} {
+	log {
+		output stderr
+		format json
+	}
+
+	root /app/public
+	encode zstd br gzip
+
+	php_server {
+		index index.php
+	}
+}

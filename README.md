@@ -1,58 +1,125 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Laremit
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A shared **subscription billing and event backend-core**. Three products — an
+EdTech app, a VPN service and an AI tutor — share one user identity, one billing
+system and one event pipeline.
 
-## About Laravel
+The targets it is built to meet:
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- 5,000 events/sec sustained, bursting to 20,000, at p99 < 50ms
+- Card and in-app purchases that never double-charge
+- A provably correct ledger under duplicated, reordered and dropped webhooks
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Every non-obvious decision is recorded in [`docs/adr/`](docs/adr/). Every
+deliberate shortcut is in [`docs/tech-debt.md`](docs/tech-debt.md).
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Status
 
-## Learning Laravel
+**Phase 1 — Foundation.** Docker stack, domain model, health checks, quality
+gate, ADR-001 and ADR-002. Event ingestion, payments and reconciliation are
+Phases 2–4.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Running it
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+cp .env.example .env
+docker compose up -d --build
+docker compose exec app php artisan key:generate
+docker compose exec app php artisan migrate --seed
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+| | |
+|---|---|
+| App | http://localhost:8100 |
+| Liveness | http://localhost:8100/up |
+| Readiness | http://localhost:8100/health |
+| Horizon | http://localhost:8100/horizon |
+| MySQL | `127.0.0.1:33100` |
+| Redis cache / queue / stream | `127.0.0.1:6301` / `6302` / `6303` |
 
-## Contributing
+Ports are set in `.env` and consumed by `compose.yaml`; change them there if they
+collide with something else on the host.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+The container runs as your host UID so bind-mounted files stay writable. If your
+UID is not 1000, set `UID`/`GID` in `.env` before building.
 
-## Code of Conduct
+### Two health endpoints, on purpose
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+`/up` is **liveness** — the PHP process can serve a request. Failing it means
+kill and restart.
 
-## Security Vulnerabilities
+`/health` is **readiness** — MySQL and all three Redis instances are reachable
+*and correctly configured*. Failing it means take this instance out of rotation;
+restarting it will not bring MySQL back.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```json
+{
+  "status": "ok",
+  "checks": {
+    "database":     { "status": "ok", "duration_ms": 0.78, "detail": { "driver": "mysql" } },
+    "redis:cache":  { "status": "ok", "duration_ms": 0.27, "detail": { "maxmemory_policy": "allkeys-lru" } },
+    "redis:queue":  { "status": "ok", "duration_ms": 0.14, "detail": { "maxmemory_policy": "noeviction" } },
+    "redis:stream": { "status": "ok", "duration_ms": 0.14, "detail": { "maxmemory_policy": "noeviction" } }
+  }
+}
+```
 
-## License
+Readiness also *enforces* ADR-002: if the queue or stream instance is running an
+evicting `maxmemory-policy`, the probe returns 503 and names the problem. That
+is the one misconfiguration — two `REDIS_*_HOST` values pointing at the same
+container — which passes every functional test and then silently deletes queued
+charges under memory pressure.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Development
+
+```bash
+composer check      # pint --test, phpstan level 6, pest
+composer lint:fix   # pint
+```
+
+Tests run against SQLite in-memory and need no containers.
+
+## Layout
+
+```
+app/
+  Domain/
+    Identity/   users — one identity across all products
+    Catalog/    products, plans, billing intervals
+    Billing/    subscriptions, statuses, stores
+  Support/
+    Health/     readiness checks
+docker/
+  app/          Dockerfile (FrankenPHP), Caddyfile, php.ini
+  mysql/        my.cnf
+  redis/        cache.conf, queue.conf, stream.conf — one per workload
+docs/
+  adr/          architecture decision records
+  tech-debt.md  deliberate shortcuts and their payoff triggers
+```
+
+Module boundaries are conventions today; Phase 7 adds architecture tests that
+fail the build when one module reaches into another's internals.
+
+## Infrastructure notes
+
+**Three Redis instances, not three databases on one.** `maxmemory-policy` is
+per-instance, and cache (evictable), queue (must never evict) and event stream
+(bounded by app-side trimming) need different answers. Full reasoning in
+[ADR-002](docs/adr/0002-redis-topology-and-eviction-policy.md).
+
+**FrankenPHP from day one.** Phase 8 enables Octane worker mode by setting
+`FRANKENPHP_CONFIG`, not by changing the app server.
+
+**MySQL runs `READ COMMITTED`.** The billing paths take short row locks, and
+REPEATABLE READ's gap locks turn concurrent charges for unrelated users into
+lock waits on the same index range. `innodb_flush_log_at_trx_commit = 1` is not
+negotiable for a ledger.
+
+**Money is integer minor units plus an ISO-4217 code.** No floats, anywhere.
+Phase 3 wraps the pair in a `Money` value object; the columns are already shaped
+for it.
+
+**Dates are immutable.** `Date::use(CarbonImmutable::class)` is set globally, and
+month arithmetic does not overflow — a subscriber billed on 31 January renews on
+28 February, not 3 March.

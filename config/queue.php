@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 return [
 
     /*
@@ -64,9 +66,12 @@ return [
             'after_commit' => false,
         ],
 
+        // Pinned to the dedicated queue Redis instance (noeviction + AOF), never
+        // the shared cache instance. Phase 6 splits this into per-workload
+        // connections — payments, events, bulk — with their own retry_after.
         'redis' => [
             'driver' => 'redis',
-            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'queue'),
             'queue' => env('REDIS_QUEUE', 'default'),
             'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
             'block_for' => null,
