@@ -23,10 +23,16 @@ Phases 2–4.
 
 ```bash
 cp .env.example .env
+docker compose run --rm --no-deps app composer install
 docker compose up -d --build
 docker compose exec app php artisan key:generate
 docker compose exec app php artisan migrate --seed
 ```
+
+The `composer install` runs inside the app image but before the stack starts:
+the source tree is bind-mounted and the dev image bakes no vendor directory in
+(debt #3), so on a fresh clone nothing would boot without it — the app
+container fails its own health check and `up` refuses to start Horizon.
 
 | | |
 |---|---|
