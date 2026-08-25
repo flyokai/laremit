@@ -62,6 +62,46 @@ services:
       app:
         condition: service_healthy
 
+  # Stream consumer-group workers (Phase 2). One container per group; scale a
+  # group with `docker compose up -d --scale worker-archive=3` — consumer
+  # names are host:pid, so replicas coexist in the group automatically.
+  worker-archive:
+    <<: *app
+    command: ['php', 'artisan', 'events:work', 'archive']
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    healthcheck:
+      # The base image healthcheck probes Caddy, which workers do not run.
+      # Liveness here is the process itself; restart policy covers exits.
+      disable: true
+
+  worker-projections:
+    <<: *app
+    command: ['php', 'artisan', 'events:work', 'projections']
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    healthcheck:
+      # The base image healthcheck probes Caddy, which workers do not run.
+      # Liveness here is the process itself; restart policy covers exits.
+      disable: true
+
+  worker-reactions:
+    <<: *app
+    command: ['php', 'artisan', 'events:work', 'reactions']
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    healthcheck:
+      # The base image healthcheck probes Caddy, which workers do not run.
+      # Liveness here is the process itself; restart policy covers exits.
+      disable: true
+
+  scheduler:
+    <<: *app
+    command: ['php', 'artisan', 'schedule:work']
+    stop_signal: SIGTERM
+    healthcheck:
+      disable: true
+
   mysql:
     image: mysql:8.4
     restart: unless-stopped

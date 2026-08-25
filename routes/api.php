@@ -2,23 +2,16 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\IngestController;
+use App\Http\Middleware\AuthenticateIngest;
+use App\Http\Middleware\DecodesGzipRequests;
 use Illuminate\Support\Facades\Route;
 
-/*
-|--------------------------------------------------------------------------
-| API routes
-|--------------------------------------------------------------------------
-|
-| Phase 2 mounts the event ingest API here:
-|
-|   POST /api/v1/events  — batch up to 500, gzip, envelope-only validation,
-|                          202 with per-event status
-|
-| Deliberately empty for now rather than absent, so the routing is wired and
-| the middleware group exists before there is anything to hang off it.
-|
-*/
-
+// Mounted with no /api prefix (bootstrap/app.php) so the wire path is
+// exactly POST /v1/events. Auth runs before gzip decoding: nothing gets
+// decompressed for a caller who could not present the token.
 Route::prefix('v1')->group(function (): void {
-    //
+    Route::post('/events', IngestController::class)
+        ->middleware([AuthenticateIngest::class, DecodesGzipRequests::class])
+        ->name('events.ingest');
 });

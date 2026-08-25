@@ -29,6 +29,18 @@
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
+        <env name="EVENTS_INGEST_TOKEN" value="test-token"/>
+        <!-- Event pipeline integration tests hit the real stream and cache
+             Redis instances via the host port map, but on database 9 with a
+             test prefix, so they can never touch development data. The tests
+             skip themselves when the containers are down. -->
+        <env name="REDIS_PREFIX" value="laremit-test:"/>
+        <env name="REDIS_STREAM_HOST" value="127.0.0.1"/>
+        <env name="REDIS_STREAM_PORT" value="6303"/>
+        <env name="REDIS_STREAM_DB" value="9"/>
+        <env name="REDIS_CACHE_HOST" value="127.0.0.1"/>
+        <env name="REDIS_CACHE_PORT" value="6301"/>
+        <env name="REDIS_CACHE_DB" value="9"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

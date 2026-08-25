@@ -15,9 +15,11 @@ deliberate shortcut is in [`docs/tech-debt.md`](docs/tech-debt.md).
 
 ## Status
 
-**Phase 1 — Foundation.** Docker stack, domain model, health checks, quality
-gate, ADR-001 and ADR-002. Event ingestion, payments and reconciliation are
-Phases 2–4.
+**Phase 2 — Event ingestion.** `POST /v1/events` (batch, gzip, envelope-only
+validation), Redis Streams buffer with three consumer groups (partitioned
+archive, HLL/bitmap projections, domain reactions), dedup, priority-class
+backpressure, schema versioning with two live versions, monthly partition
+retention, ADR-003. Payments and reconciliation are Phases 3–4.
 
 ## Running it
 
@@ -76,6 +78,75 @@ is the one misconfiguration — two `REDIS_*_HOST` values pointing at the same
 container — which passes every functional test and then silently deletes queued
 charges under memory pressure.
 
+## Event ingestion
+
+```
+POST /v1/events
+Authorization: Bearer $EVENTS_INGEST_TOKEN
+Content-Type: application/json
+Content-Encoding: gzip            # optional
+```
+
+```json
+{"events": [{
+  "event_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "type": "video.watched",
+  "schema_version": 2,
+  "occurred_at": "2026-08-25T10:00:00Z",
+  "user_id": 42,
+  "product": "edtech",
+  "priority": "analytics",
+  "payload": {"video_id": "v1", "position_ms": 30000}
+}]}
+```
+
+Up to 500 events per batch. The response is always 202 with a per-event
+status in submission order — `accepted`, `duplicate` (event_id already seen),
+`invalid` (with field errors), or `shed` (backpressure; retry after the
+`Retry-After` header) — unless the buffer is over the reject watermark, which
+is a whole-request 429. Acceptance means *durably buffered*, not processed.
+
+Behind the 202: client-generated `event_id` deduped via `SET NX EX`, a Redis
+Stream on the dedicated stream instance, and three consumer groups —
+
+| Group | Does | Idempotency |
+|---|---|---|
+| `archive` | inserts into month-partitioned `events_archive` | `INSERT IGNORE` on `(event_id, received_at)` |
+| `projections` | DAU HyperLogLog + activity bitmap per day | `PFADD`/`SETBIT` are commutative |
+| `reactions` | dispatches queued domain jobs (map in `config/events.php`) | reacted-marker; jobs must be idempotent |
+
+Workers run as `php artisan events:work {group}` (one container each in
+compose; scale with `--scale worker-archive=3`). `php artisan events:status`
+shows depth, per-group lag, dead letters and today's DAU. Old events age out
+by monthly partition drop (`events:partitions`, scheduled daily) with
+`model:prune` as the portable fallback.
+
+Schema versions: two are live at once (`config/events.php`); consumers
+upcast old payloads through `SchemaRegistry`, and the archive stores what
+was actually received.
+
+### Load test
+
+```bash
+k6 run load/k6-ingest.js                          # 5k events/s for 60s, p99 < 50ms threshold
+k6 run -e RPS=100 -e BATCH=200 load/k6-ingest.js  # 20k events/s burst
+```
+
+### Chaos runbook — kill a consumer mid-batch
+
+```bash
+docker compose kill -s SIGKILL worker-archive     # not SIGTERM: no goodbye
+# ingest keeps accepting; entries pile into the dead consumer's PEL
+docker compose up -d worker-archive               # replacement claims via XAUTOCLAIM
+php artisan events:status                         # pending drains back to 0
+```
+
+Accepted count vs `SELECT COUNT(*) FROM events_archive` must match exactly:
+no loss (unacked entries are reclaimed), no double-count (idempotent
+consumers). The same scenario runs mechanically in CI —
+`tests/Feature/Events/EventPipelineTest.php`, "survives a consumer killed
+mid-batch".
+
 ## Development
 
 ```bash
@@ -83,7 +154,9 @@ composer check      # pint --test, phpstan level 6, pest
 composer lint:fix   # pint
 ```
 
-Tests run against SQLite in-memory and need no containers.
+Tests run against SQLite in-memory. The event pipeline integration tests
+additionally use the stream/cache Redis containers (database 9, test key
+prefix — never development data) and skip themselves when the stack is down.
 
 ## Layout
 
@@ -93,6 +166,7 @@ app/
     Identity/   users — one identity across all products
     Catalog/    products, plans, billing intervals
     Billing/    subscriptions, statuses, stores
+    Events/     ingest, stream buffer, consumers, projections (Phase 2)
   Support/
     Health/     readiness checks
 docker/
@@ -102,6 +176,8 @@ docker/
 docs/
   adr/          architecture decision records
   tech-debt.md  deliberate shortcuts and their payoff triggers
+load/
+  k6-ingest.js  the 5k events/sec deliverable, as a script
 ```
 
 Module boundaries are conventions today; Phase 7 adds architecture tests that

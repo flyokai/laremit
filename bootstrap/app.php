@@ -12,6 +12,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
+        // No /api prefix: the brief's wire contract is POST /v1/events.
+        apiPrefix: '',
         commands: __DIR__.'/../routes/console.php',
         // Liveness: the PHP process can serve a request. Readiness — can it
         // reach MySQL and all three Redis instances — is /health.
@@ -25,6 +27,6 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*', 'health'),
+            fn (Request $request) => $request->is('v1/*', 'health'),
         );
     })->create();
