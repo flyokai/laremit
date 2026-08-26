@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Domain\Events\Consumers\ArchiveConsumer;
+use App\Domain\Events\Consumers\ProjectionConsumer;
+use App\Domain\Events\Consumers\ReactionConsumer;
+
 return [
 
     /*
@@ -103,12 +107,30 @@ return [
     | max_deliveries: past this, an entry is a poison message and goes to the
     | dead-letter list instead of blocking the group forever.
     |
+    | groups: the one source of truth for which consumer groups exist, name
+    | => Consumer class. `events:work {group}` resolves and validates against
+    | this map; `events:check-lag` expects every key here to exist on the
+    | stream. XADD MAXLEN trims by aggregate stream length only — it has no
+    | idea whether any one group has actually read an entry. A group whose
+    | worker never starts (or died and stayed dead) never advances its
+    | cursor, so entries it never got to can be trimmed out from under it
+    | with zero signal anywhere else: no PEL row, no XAUTOCLAIM deletedIds,
+    | nothing. This map plus max_lag/max_pending is what makes that failure
+    | loud instead of silent.
+    |
     */
 
     'consumers' => [
         'claim_idle_ms' => (int) env('EVENTS_CLAIM_IDLE_MS', 30_000),
         'max_deliveries' => (int) env('EVENTS_MAX_DELIVERIES', 6),
         'dead_letter_key' => 'events:dead',
+        'groups' => [
+            'archive' => ArchiveConsumer::class,
+            'projections' => ProjectionConsumer::class,
+            'reactions' => ReactionConsumer::class,
+        ],
+        'max_lag' => (int) env('EVENTS_MAX_GROUP_LAG', 100_000),
+        'max_pending' => (int) env('EVENTS_MAX_GROUP_PENDING', 10_000),
     ],
 
     /*

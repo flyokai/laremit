@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace App\Domain\Events\Console;
 
-use App\Domain\Events\Consumers\ArchiveConsumer;
-use App\Domain\Events\Consumers\ProjectionConsumer;
-use App\Domain\Events\Consumers\ReactionConsumer;
 use App\Domain\Events\Contracts\Consumer;
 use App\Domain\Events\Contracts\EventBuffer;
 use App\Domain\Events\Stream\PendingEvent;
@@ -30,12 +27,6 @@ use Throwable;
  */
 final class WorkCommand extends Command
 {
-    private const GROUPS = [
-        'archive' => ArchiveConsumer::class,
-        'projections' => ProjectionConsumer::class,
-        'reactions' => ReactionConsumer::class,
-    ];
-
     protected $signature = 'events:work
         {group : Consumer group to run: archive, projections or reactions}
         {--consumer= : Consumer name within the group (default host:pid)}
@@ -53,14 +44,17 @@ final class WorkCommand extends Command
     {
         $group = (string) $this->argument('group');
 
-        if (! isset(self::GROUPS[$group])) {
-            $this->error(sprintf('Unknown group [%s]; expected one of: %s.', $group, implode(', ', array_keys(self::GROUPS))));
+        /** @var array<string, class-string<Consumer>> $groups */
+        $groups = (array) config('events.consumers.groups', []);
+
+        if (! isset($groups[$group])) {
+            $this->error(sprintf('Unknown group [%s]; expected one of: %s.', $group, implode(', ', array_keys($groups))));
 
             return self::INVALID;
         }
 
         /** @var Consumer $consumer */
-        $consumer = $this->laravel->make(self::GROUPS[$group]);
+        $consumer = $this->laravel->make($groups[$group]);
 
         $name = (string) ($this->option('consumer') ?: gethostname().':'.getmypid());
         $batch = max(1, (int) $this->option('batch'));

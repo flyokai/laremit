@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Events;
 
+use App\Domain\Events\Console\CheckLagCommand;
 use App\Domain\Events\Console\PartitionsCommand;
 use App\Domain\Events\Console\StatusCommand;
 use App\Domain\Events\Console\WorkCommand;
@@ -125,6 +126,7 @@ final class EventsServiceProvider extends ServiceProvider
                 WorkCommand::class,
                 PartitionsCommand::class,
                 StatusCommand::class,
+                CheckLagCommand::class,
             ]);
         }
     }
