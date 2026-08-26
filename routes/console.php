@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Domain\Events\Models\ArchivedEvent;
+use App\Support\Idempotency\IdempotencyRecord;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -15,7 +16,7 @@ Artisan::command('inspire', function (): void {
 // the heavy deletion as metadata drops — then model:prune sweeps whatever a
 // non-partitioned driver (or a missed rotation) left behind.
 Schedule::command('events:partitions', ['--force'])->dailyAt('01:00');
-Schedule::command('model:prune', ['--model' => [ArchivedEvent::class]])->dailyAt('02:00');
+Schedule::command('model:prune', ['--model' => [ArchivedEvent::class, IdempotencyRecord::class]])->dailyAt('02:00');
 
 // A missing or stalled consumer group is silent otherwise: XADD MAXLEN trims
 // by aggregate stream length, oblivious to any one group's progress. Cadence

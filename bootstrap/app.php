@@ -20,6 +20,13 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
         then: function (): void {
             Route::group([], base_path('routes/health.php'));
+
+            // The pretend payment provider — local tooling, never deployed.
+            if ((bool) config('mockpsp.enabled')) {
+                Route::middleware('api')
+                    ->prefix('mock-psp')
+                    ->group(base_path('routes/mock-psp.php'));
+            }
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
@@ -27,6 +34,6 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('v1/*', 'health'),
+            fn (Request $request) => $request->is('v1/*', 'health', 'mock-psp/*'),
         );
     })->create();

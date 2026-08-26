@@ -30,6 +30,12 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="EVENTS_INGEST_TOKEN" value="test-token"/>
+        <env name="BILLING_API_TOKEN" value="test-billing-token"/>
+        <env name="BILLING_PSP_DRIVER" value="loopback"/>
+        <env name="PSP_WEBHOOK_SECRET" value="test-psp-secret"/>
+        <env name="MOCKPSP_WEBHOOK_DELAY_MIN" value="0"/>
+        <env name="MOCKPSP_WEBHOOK_DELAY_MAX" value="0"/>
+        <env name="MOCKPSP_WEBHOOK_DUPLICATE_RATE" value="0"/>
         <!-- Event pipeline integration tests hit the real stream and cache
              Redis instances via the host port map, but on database 9 with a
              test prefix, so they can never touch development data. The tests

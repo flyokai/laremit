@@ -9,7 +9,7 @@ rewritten is a decision nobody can be held to.
 | [0001](0001-modular-monolith-over-services.md) | Modular monolith, not services | Accepted | 1 |
 | [0002](0002-redis-topology-and-eviction-policy.md) | Redis topology and eviction policy per instance | Accepted | 1 |
 | [0003](0003-redis-streams-over-kafka.md) | Redis Streams as the event buffer, with a named Kafka trigger | Accepted | 2 |
-| 0004 | Idempotency strategy across all three layers | Planned | 3 |
+| [0004](0004-idempotency-across-three-layers.md) | Idempotency at every layer money crosses | Accepted | 3 |
 | 0005 | Store-as-source-of-truth for IAP entitlements | Planned | 4 |
 | 0006 | Thin vs fat event payloads | Planned | 5 |
 | 0007 | Queue topology and isolation guarantees | Planned | 6 |

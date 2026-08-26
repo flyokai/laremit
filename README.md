@@ -15,11 +15,12 @@ deliberate shortcut is in [`docs/tech-debt.md`](docs/tech-debt.md).
 
 ## Status
 
-**Phase 2 — Event ingestion.** `POST /v1/events` (batch, gzip, envelope-only
-validation), Redis Streams buffer with three consumer groups (partitioned
-archive, HLL/bitmap projections, domain reactions), dedup, priority-class
-backpressure, schema versioning with two live versions, monthly partition
-retention, ADR-003. Payments and reconciliation are Phases 3–4.
+**Phase 3 — Payments core.** Money as a value object, three-layer
+idempotency (ADR-004), a deliberately hostile mock PSP (timeouts that
+secretly charge, webhooks late/duplicated/out of order), payment intents →
+`ChargeJob`, an append-only balanced ledger, the subscription state
+machine, and the single `hasAccessTo` entitlement function. Webhook-edge
+hardening, reconciliation and IAP are Phase 4.
 
 ## Running it
 
@@ -77,6 +78,52 @@ evicting `maxmemory-policy`, the probe returns 503 and names the problem. That
 is the one misconfiguration — two `REDIS_*_HOST` values pointing at the same
 container — which passes every functional test and then silently deletes queued
 charges under memory pressure.
+
+## Payments
+
+```
+POST /v1/payments            Authorization: Bearer $BILLING_API_TOKEN
+Idempotency-Key: <client-generated>
+{"user_id": 1, "product": "edtech", "plan": "monthly"}
+```
+
+Answers 202 — charging is asynchronous (`ChargeJob`, retried with backoff).
+Poll `GET /v1/payments/{id}`; ask `GET /v1/entitlements?user_id=&product=`
+for the only entitlement answer that exists.
+
+Idempotency is layered per ADR-004, and the layers are deliberately
+redundant:
+
+1. **Inbound** — `Idempotency-Key` header: atomic claim, stored-response
+   replay (`Idempotency-Replayed: true`), 422 on key reuse with a different
+   body, 409 while the original is running.
+2. **PSP boundary** — one `psp_idempotency_key` per intent for life; every
+   retry reuses it, so N attempts are at most one charge. A PSP timeout is
+   treated as *unknown*, never as failure.
+3. **Ledger** — every outcome funnels through `ApplyChargeOutcome` under a
+   row lock, and `ledger_entries` unique keys are the database-enforced
+   floor beneath it.
+
+The ledger is double-entry and append-only (updates throw): a successful
+charge books `+psp_cash / -revenue`, every transaction sums to zero, and
+`php artisan billing:ledger` prints the trial balance and fails if the books
+are off by a minor unit.
+
+### The mock PSP
+
+`/mock-psp/*` (local tooling, `MOCKPSP_ENABLED`) is built to be hostile:
+idempotency keys honoured byte-exactly, webhooks delivered late, duplicated
+and out of order — and outcomes forced by amount convention:
+
+| `amount_minor % 100` | Outcome |
+|---|---|
+| 1 | **timeout, but the charge succeeds** — the caller must not double-charge |
+| 2 | declined |
+| 3 | timeout, nothing recorded — settles only by reconciliation (Phase 4) |
+| other | succeeds (or random per `POST /mock-psp/config` rates) |
+
+The chaos deliverable — random timeouts, duplicated and reordered webhooks,
+ledger exactly correct — runs as `tests/Feature/Billing/PaymentChaosTest.php`.
 
 ## Event ingestion
 
@@ -165,10 +212,12 @@ app/
   Domain/
     Identity/   users — one identity across all products
     Catalog/    products, plans, billing intervals
-    Billing/    subscriptions, statuses, stores
+    Billing/    money, payment intents, ledger, state machine, entitlements
     Events/     ingest, stream buffer, consumers, projections (Phase 2)
+  MockPsp/      the pretend payment provider (hostile on purpose)
   Support/
     Health/     readiness checks
+    Idempotency/ inbound idempotency records (ADR-004 layer 1)
 docker/
   app/          Dockerfile (FrankenPHP), Caddyfile, php.ini
   mysql/        my.cnf

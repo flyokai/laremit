@@ -11,3 +11,5 @@ pest()->extend(TestCase::class)
 
 pest()->extend(TestCase::class)
     ->in('Unit');
+
+require_once __DIR__.'/Feature/Support/pest-helpers.php';
