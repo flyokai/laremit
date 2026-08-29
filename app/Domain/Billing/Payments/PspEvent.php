@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Billing\Payments;
 
+use App\Domain\Billing\Psp\RemoteCharge;
 use Carbon\CarbonImmutable;
 use InvalidArgumentException;
 
@@ -28,6 +29,24 @@ final readonly class PspEvent
     public function succeeded(): bool
     {
         return $this->type === 'charge.succeeded';
+    }
+
+    /**
+     * Reconciliation's road in: the provider's own record of the charge,
+     * normalized into the shape the funnel already understands.
+     */
+    public static function fromRemote(RemoteCharge $charge, int $paymentIntentId): self
+    {
+        return new self(
+            "reconcile_{$charge->chargeId}",
+            $charge->succeeded ? 'charge.succeeded' : 'charge.failed',
+            $charge->chargeId,
+            $paymentIntentId,
+            $charge->amountMinor,
+            $charge->currency,
+            $charge->declineCode,
+            $charge->createdAt,
+        );
     }
 
     /**

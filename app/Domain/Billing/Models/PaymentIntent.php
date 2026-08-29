@@ -33,6 +33,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $psp_idempotency_key
  * @property string|null $psp_reference
  * @property string|null $last_error
+ * @property int $refunded_minor
+ * @property int $recovery_attempts
+ * @property CarbonImmutable|null $last_recovered_at
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  * @property-read User $user
@@ -49,6 +52,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'psp_idempotency_key',
     'psp_reference',
     'last_error',
+    'refunded_minor',
+    'recovery_attempts',
+    'last_recovered_at',
 ])]
 final class PaymentIntent extends Model
 {
@@ -79,6 +85,17 @@ final class PaymentIntent extends Model
         return $this->belongsTo(Plan::class);
     }
 
+    public function refundedAmount(): Money
+    {
+        return Money::of($this->refunded_minor, $this->currency);
+    }
+
+    /** Every minor unit of the charge has been given back. */
+    public function isFullyRefunded(): bool
+    {
+        return $this->refunded_minor >= $this->amount_minor;
+    }
+
     protected static function newFactory(): PaymentIntentFactory
     {
         return PaymentIntentFactory::new();
@@ -92,6 +109,9 @@ final class PaymentIntent extends Model
         return [
             'amount' => MoneyCast::class,
             'status' => PaymentIntentStatus::class,
+            'refunded_minor' => 'integer',
+            'recovery_attempts' => 'integer',
+            'last_recovered_at' => 'immutable_datetime',
         ];
     }
 }

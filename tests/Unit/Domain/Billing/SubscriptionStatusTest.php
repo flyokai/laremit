@@ -17,10 +17,13 @@ it('grants access only in the states that should', function (SubscriptionStatus 
     // Cancelled-but-still-paid access comes from current_period_end, not here.
     'canceled' => [SubscriptionStatus::Canceled, false],
     'expired' => [SubscriptionStatus::Expired, false],
+    // Refund, chargeback, store revocation: access removed immediately.
+    'revoked' => [SubscriptionStatus::Revoked, false],
 ]);
 
-it('treats only expired as terminal', function (): void {
+it('treats expired and revoked as terminal for transitions we initiate', function (): void {
     expect(SubscriptionStatus::Expired->isTerminal())->toBeTrue()
+        ->and(SubscriptionStatus::Revoked->isTerminal())->toBeTrue()
         ->and(SubscriptionStatus::Canceled->isTerminal())->toBeFalse();
 });
 

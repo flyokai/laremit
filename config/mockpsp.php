@@ -21,8 +21,9 @@ return [
     |     anything else follows the random rates below; metadata.force
     |     ("succeed" | "declined" | "timeout_charged" | "timeout_lost")
     |     overrides everything.
-    |   - webhooks fired late (random delay), duplicated (duplicate_rate)
-    |     and therefore out of order across charges.
+    |   - webhooks fired late (random delay), duplicated (duplicate_rate),
+    |     dropped outright (drop_rate), and therefore out of order across
+    |     charges.
     |
     | The %100==1 case is the whole reason this mock exists: the caller sees
     | a timeout, the money moved anyway, and only an idempotent retry or the
@@ -52,6 +53,9 @@ return [
             (int) env('MOCKPSP_WEBHOOK_DELAY_MAX', 3),
         ],
         'duplicate_rate' => (float) env('MOCKPSP_WEBHOOK_DUPLICATE_RATE', 0.25),
+        // Phase 4's lever: a dropped webhook is never sent at all, and only
+        // reconciliation can find what it would have said.
+        'drop_rate' => (float) env('MOCKPSP_WEBHOOK_DROP_RATE', 0.0),
     ],
 
 ];

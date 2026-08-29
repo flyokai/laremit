@@ -19,6 +19,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * One user's standing entitlement to one product.
  *
+ * For store == Psp this row IS the subscription. For Apple/Google it is a
+ * projection of the store's record (ADR-005): the store owns the lifecycle,
+ * store_original_transaction_id names the store's record, and last_event_at
+ * is the store's clock — the watermark stale notifications are rejected
+ * against.
+ *
  * @property int $id
  * @property int $user_id
  * @property int $product_id
@@ -30,6 +36,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property CarbonImmutable|null $current_period_start
  * @property CarbonImmutable|null $current_period_end
  * @property CarbonImmutable|null $canceled_at
+ * @property CarbonImmutable|null $revoked_at
  * @property CarbonImmutable|null $last_event_at
  * @property-read User $user
  * @property-read Product $product
@@ -46,6 +53,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'current_period_start',
     'current_period_end',
     'canceled_at',
+    'revoked_at',
     'last_event_at',
 ])]
 final class Subscription extends Model
@@ -81,8 +89,8 @@ final class Subscription extends Model
      * Whether the paid period is still running.
      *
      * Kept separate from SubscriptionStatus::grantsAccess() because a cancelled
-     * subscription keeps access until its period ends. Phase 3 combines the two
-     * into the single hasAccessTo(user, product) entitlement function.
+     * subscription keeps access until its period ends. The single
+     * hasAccessTo(user, product) entitlement function combines the two.
      */
     public function withinCurrentPeriod(?CarbonImmutable $at = null): bool
     {
@@ -107,6 +115,7 @@ final class Subscription extends Model
             'current_period_start' => 'immutable_datetime',
             'current_period_end' => 'immutable_datetime',
             'canceled_at' => 'immutable_datetime',
+            'revoked_at' => 'immutable_datetime',
             'last_event_at' => 'immutable_datetime',
         ];
     }

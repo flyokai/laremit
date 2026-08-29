@@ -9,6 +9,8 @@ use App\Domain\Billing\Exceptions\PspTimedOut;
 use App\Domain\Billing\Exceptions\PspUnavailable;
 use App\Domain\Billing\Money\Money;
 use App\Domain\Billing\Psp\ChargeResult;
+use App\Domain\Billing\Psp\RemoteCharge;
+use Carbon\CarbonImmutable;
 use RuntimeException;
 
 /**
@@ -46,5 +48,17 @@ final readonly class LoopbackPspClient implements PspClient
         }
 
         throw new PspUnavailable("PSP answered {$response->status} without a definitive outcome.");
+    }
+
+    public function listCharges(CarbonImmutable $since): array
+    {
+        return array_map(RemoteCharge::fromArray(...), $this->psp->listCharges($since));
+    }
+
+    public function findCharge(string $idempotencyKey): ?RemoteCharge
+    {
+        $charge = $this->psp->findCharge($idempotencyKey);
+
+        return $charge === null ? null : RemoteCharge::fromArray($charge);
     }
 }

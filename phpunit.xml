@@ -36,6 +36,17 @@
         <env name="MOCKPSP_WEBHOOK_DELAY_MIN" value="0"/>
         <env name="MOCKPSP_WEBHOOK_DELAY_MAX" value="0"/>
         <env name="MOCKPSP_WEBHOOK_DUPLICATE_RATE" value="0"/>
+        <env name="MOCKPSP_WEBHOOK_DROP_RATE" value="0"/>
+        <env name="BILLING_STORES_DRIVER" value="loopback"/>
+        <env name="BILLING_STORES_ENVIRONMENT" value="Sandbox"/>
+        <env name="GOOGLE_RTDN_TOKEN" value="test-rtdn-token"/>
+        <!-- A throwaway ES256 pair for the mock App Store; nothing real signs with it. -->
+        <env name="APPLE_ASSN_PUBLIC_KEY" value="LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFb1A4bk9KMkFhci9abjRSWXNWUVB1VmljT0E5NwpFTWgzVXg1bkNJY1lVUnFjVUphODRkd0FHcXk2K3NWOEp2NnZPcUlUSFQ4dnJrL25OZzI3VjA3emtnPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg=="/>
+        <env name="MOCK_APPLE_SIGNING_KEY" value="LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZy9UWE1ValhCT0hwME9FcmUKdWVreTNKR3NZVW1PWG1FMFpldkFxRTN6bWV5aFJBTkNBQVNnL3ljNG5ZQnF2OW1maEZpeFZBKzVXSnc0RDNzUQp5SGRUSG1jSWh4aFJHcHhRbHJ6aDNBQWFyTHI2eFh3bS9xODZvaE1kUHkrdVQrYzJEYnRYVHZPUwotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg=="/>
+        <env name="MOCKSTORES_DELAY_MIN" value="0"/>
+        <env name="MOCKSTORES_DELAY_MAX" value="0"/>
+        <env name="MOCKSTORES_DUPLICATE_RATE" value="0"/>
+        <env name="MOCKSTORES_DROP_RATE" value="0"/>
         <!-- Event pipeline integration tests hit the real stream and cache
              Redis instances via the host port map, but on database 9 with a
              test prefix, so they can never touch development data. The tests

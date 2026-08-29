@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\MockPsp\Jobs\DeliverPspWebhook;
 use App\MockPsp\Models\PspCharge;
+use App\MockPsp\Models\PspRefund;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 
@@ -114,4 +115,63 @@ it('requires an idempotency key', function (): void {
     $this->postJson('/mock-psp/v1/charges', pspBody(1000))
         ->assertStatus(400)
         ->assertJsonPath('error', 'missing_idempotency_key');
+});
+
+it('refunds a succeeded charge as its own record and fires charge.refunded', function (): void {
+    $chargeId = pspCharge(pspBody(1000), 'psp-key-9')->json('charge_id');
+
+    $refund = $this->postJson("/mock-psp/v1/charges/{$chargeId}/refunds", ['amount_minor' => 400, 'reason' => 'goodwill'])
+        ->assertStatus(201)
+        ->assertJsonPath('charge_id', $chargeId)
+        ->assertJsonPath('amount_minor', 400);
+
+    expect(PspRefund::query()->count())->toBe(1)
+        ->and($refund->json('refund_id'))->toStartWith('re_');
+
+    Queue::assertPushed(DeliverPspWebhook::class, function (DeliverPspWebhook $job) use ($refund): bool {
+        return ($job->payload['type'] ?? null) === 'charge.refunded'
+            && ($job->payload['data']['refund_id'] ?? null) === $refund->json('refund_id')
+            && ($job->payload['data']['amount_minor'] ?? null) === 400;
+    });
+
+    // The remainder, then nothing more.
+    $this->postJson("/mock-psp/v1/charges/{$chargeId}/refunds")->assertStatus(201)->assertJsonPath('amount_minor', 600);
+    $this->postJson("/mock-psp/v1/charges/{$chargeId}/refunds")->assertStatus(400)->assertJsonPath('error', 'amount_exceeds_charge');
+});
+
+it('refuses to refund unknown or declined charges', function (): void {
+    $this->postJson('/mock-psp/v1/charges/ch_nope/refunds')->assertStatus(404);
+
+    $declined = pspCharge(pspBody(1002), 'psp-key-10')->json('charge_id');
+    $this->postJson("/mock-psp/v1/charges/{$declined}/refunds")->assertStatus(400)->assertJsonPath('error', 'charge_not_refundable');
+});
+
+it('lists charges since a point in time, refunds included', function (): void {
+    $chargeId = pspCharge(pspBody(1000), 'psp-key-11')->json('charge_id');
+    $this->postJson("/mock-psp/v1/charges/{$chargeId}/refunds", ['amount_minor' => 250]);
+
+    $listing = $this->getJson('/mock-psp/v1/charges?since='.urlencode(now()->subMinute()->toISOString()))->assertOk();
+
+    expect($listing->json('charges'))->toHaveCount(1)
+        ->and($listing->json('charges.0.idempotency_key'))->toBe('psp-key-11')
+        ->and($listing->json('charges.0.status'))->toBe('succeeded')
+        ->and($listing->json('charges.0.refunds.0.amount_minor'))->toBe(250);
+
+    expect($this->getJson('/mock-psp/v1/charges?since='.urlencode(now()->addMinute()->toISOString()))->json('charges'))->toBe([]);
+    $this->getJson('/mock-psp/v1/charges')->assertStatus(400);
+});
+
+it('looks a charge up by the caller\'s idempotency key, definitively', function (): void {
+    pspCharge(pspBody(1000), 'psp-key-12');
+
+    $this->getJson('/mock-psp/v1/charges?idempotency_key=psp-key-12')->assertOk()->assertJsonPath('charge.idempotency_key', 'psp-key-12');
+    $this->getJson('/mock-psp/v1/charges?idempotency_key=never-used')->assertStatus(404);
+});
+
+it('drops webhooks when told to', function (): void {
+    config()->set('mockpsp.webhook.drop_rate', 1.0);
+
+    pspCharge(pspBody(1000), 'psp-key-13')->assertStatus(201);
+
+    Queue::assertNothingPushed();
 });

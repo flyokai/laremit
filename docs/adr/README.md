@@ -10,7 +10,7 @@ rewritten is a decision nobody can be held to.
 | [0002](0002-redis-topology-and-eviction-policy.md) | Redis topology and eviction policy per instance | Accepted | 1 |
 | [0003](0003-redis-streams-over-kafka.md) | Redis Streams as the event buffer, with a named Kafka trigger | Accepted | 2 |
 | [0004](0004-idempotency-across-three-layers.md) | Idempotency at every layer money crosses | Accepted | 3 |
-| 0005 | Store-as-source-of-truth for IAP entitlements | Planned | 4 |
+| [0005](0005-store-as-source-of-truth-for-iap.md) | The app store is the source of truth for IAP; we hold a projection | Accepted | 4 |
 | 0006 | Thin vs fat event payloads | Planned | 5 |
 | 0007 | Queue topology and isolation guarantees | Planned | 6 |
 | 0008 | Octane adoption, with the audit checklist | Planned | 8 |

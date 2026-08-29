@@ -27,6 +27,13 @@ return Application::configure(basePath: dirname(__DIR__))
                     ->prefix('mock-psp')
                     ->group(base_path('routes/mock-psp.php'));
             }
+
+            // The pretend App Store and Play Store — same rule.
+            if ((bool) config('mockstores.enabled')) {
+                Route::middleware('api')
+                    ->prefix('mock-stores')
+                    ->group(base_path('routes/mock-stores.php'));
+            }
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
@@ -34,6 +41,6 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('v1/*', 'health', 'mock-psp/*'),
+            fn (Request $request) => $request->is('v1/*', 'health', 'mock-psp/*', 'mock-stores/*'),
         );
     })->create();

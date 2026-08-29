@@ -68,6 +68,14 @@ class SubscriptionFactory extends Factory
         ]);
     }
 
+    public function revoked(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'status' => SubscriptionStatus::Revoked,
+            'revoked_at' => CarbonImmutable::now(),
+        ]);
+    }
+
     public function fromStore(Store $store): static
     {
         return $this->state(fn (array $attributes) => [

@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\AppleNotificationController;
 use App\Http\Controllers\EntitlementController;
+use App\Http\Controllers\GoogleNotificationController;
+use App\Http\Controllers\IapSyncController;
 use App\Http\Controllers\IngestController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\PspWebhookController;
@@ -28,9 +31,19 @@ Route::prefix('v1')->group(function (): void {
             ->whereNumber('payment')
             ->name('payments.show');
         Route::get('/entitlements', EntitlementController::class)->name('entitlements.show');
+
+        // "Restore purchases": the client names a store subscription, we
+        // re-fetch it from the store and project THAT — never the claim.
+        Route::post('/iap/{store}/sync', IapSyncController::class)
+            ->whereIn('store', ['apple', 'google'])
+            ->name('iap.sync');
     });
 
-    // Authenticated by HMAC signature, not bearer token; never idempotency-
-    // middleware'd — webhook dedup happens at application, not at the edge.
+    // Provider-facing endpoints: authenticated by what each provider
+    // actually sends (HMAC header, JWS signature, Pub/Sub token), never by
+    // our bearer token, and never idempotency-middleware'd — every one
+    // persists raw under a provider-event-id unique key and dedupes there.
     Route::post('/psp/webhook', PspWebhookController::class)->name('psp.webhook');
+    Route::post('/iap/apple/notifications', AppleNotificationController::class)->name('iap.apple.notifications');
+    Route::post('/iap/google/notifications', GoogleNotificationController::class)->name('iap.google.notifications');
 });

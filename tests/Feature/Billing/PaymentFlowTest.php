@@ -31,24 +31,6 @@ function flowHeaders(): array
     return ['Authorization' => 'Bearer test-billing-token', 'Idempotency-Key' => (string) Str::uuid()];
 }
 
-/**
- * Run charge attempts the way the queue would: retry on ambiguity with the
- * same intent (and therefore the same PSP idempotency key), give up after
- * the job's attempt budget.
- */
-function chargeWithRetries(int $intentId, int $maxAttempts = 5): void
-{
-    foreach (range(1, $maxAttempts) as $attempt) {
-        try {
-            app(ChargeProcessor::class)->process($intentId);
-
-            return;
-        } catch (PspUnavailable) {
-            // next attempt
-        }
-    }
-}
-
 it('charges, books the ledger, activates the subscription, grants access', function (): void {
     Queue::fake([DeliverPspWebhook::class]);
     $plan = flowPlan(1499);

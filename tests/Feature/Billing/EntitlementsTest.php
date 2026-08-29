@@ -24,7 +24,15 @@ it('grants and denies access per subscription state', function (SubscriptionStat
     'paused' => [SubscriptionStatus::Paused, false],
     'incomplete' => [SubscriptionStatus::Incomplete, false],
     'expired' => [SubscriptionStatus::Expired, false],
+    'revoked' => [SubscriptionStatus::Revoked, false],
 ]);
+
+it('denies a revoked subscription even inside its paid period', function (): void {
+    $revoked = Subscription::factory()->revoked()->create();
+
+    expect($revoked->withinCurrentPeriod())->toBeTrue()
+        ->and(entitlements()->hasAccessTo($revoked->user_id, $revoked->product->slug))->toBeFalse();
+});
 
 it('keeps access for a canceled subscription until its paid period ends', function (): void {
     $inPeriod = Subscription::factory()->canceled()->create();

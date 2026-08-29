@@ -110,6 +110,37 @@ final readonly class Ledger
         );
     }
 
+    /**
+     * A refund: cash leaves the PSP balance (-psp_cash) and the same amount
+     * lands in the contra-revenue account (+refunds), so gross revenue stays
+     * readable and net revenue is revenue + refunds. Keyed on the REFUND id,
+     * not the charge: two partial refunds are two facts and two transactions.
+     */
+    public function recordRefund(PaymentIntent $intent, string $refundId, Money $amount, CarbonImmutable $occurredAt): bool
+    {
+        if (! $amount->isPositive()) {
+            throw new InvalidArgumentException("Refusing to record a non-positive refund ({$amount}).");
+        }
+
+        if ($amount->currency !== $intent->currency) {
+            throw new InvalidArgumentException(
+                "Refund currency {$amount->currency} does not match the charge's {$intent->currency}."
+            );
+        }
+
+        return $this->record(
+            LedgerEntryType::Refund,
+            'payment_intent',
+            (string) $intent->id,
+            "refund:{$refundId}",
+            $occurredAt,
+            [
+                [LedgerAccount::PspCash, $amount->negate()],
+                [LedgerAccount::Refunds, $amount],
+            ],
+        );
+    }
+
     public function balance(LedgerAccount $account, string $currency): Money
     {
         $sum = LedgerEntry::query()

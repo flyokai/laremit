@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace App\Domain\Billing\Enums;
 
 /**
- * The transition allow-list and the state machine that enforces it arrive in
- * Phase 3. This enum only names the states and answers the one question every
- * product asks: does this state grant access right now?
+ * The states a subscription can be in. The transition allow-list and the
+ * state machine that enforces it live in SubscriptionStateMachine; this
+ * enum answers the one question every product asks: does this state grant
+ * access right now?
  */
 enum SubscriptionStatus: string
 {
@@ -29,6 +30,12 @@ enum SubscriptionStatus: string
     case Expired = 'expired';
 
     /**
+     * Refund, chargeback or store revocation. Access removed immediately,
+     * from any state — the one transition that bypasses everything.
+     */
+    case Revoked = 'revoked';
+
+    /**
      * Whether the state itself grants access.
      *
      * PastDue deliberately grants access: revoking during dunning costs more in
@@ -36,21 +43,27 @@ enum SubscriptionStatus: string
      * failed renewal for days before giving up. Canceled does not grant access
      * on its own — a cancelled subscription still inside its paid period is
      * granted access by current_period_end, not by status, so that decision
-     * stays in one place (the Phase 3 entitlement function).
+     * stays in one place (the entitlement function).
      */
     public function grantsAccess(): bool
     {
         return match ($this) {
             self::Trialing, self::Active, self::PastDue => true,
-            self::Incomplete, self::Paused, self::Canceled, self::Expired => false,
+            self::Incomplete, self::Paused, self::Canceled, self::Expired, self::Revoked => false,
         };
     }
 
-    /** No further transitions are possible out of a terminal state. */
+    /**
+     * No transition WE initiate leaves a terminal state: a new purchase on
+     * the PSP path starts a new row. Store-authoritative mirrors are the
+     * exception (SubscriptionStateMachine::mirror) — Apple reuses one
+     * originalTransactionId across resubscribes, so the same row must be
+     * able to come back when the store says it did.
+     */
     public function isTerminal(): bool
     {
         return match ($this) {
-            self::Expired => true,
+            self::Expired, self::Revoked => true,
             default => false,
         };
     }

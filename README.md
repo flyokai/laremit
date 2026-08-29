@@ -15,12 +15,14 @@ deliberate shortcut is in [`docs/tech-debt.md`](docs/tech-debt.md).
 
 ## Status
 
-**Phase 3 — Payments core.** Money as a value object, three-layer
-idempotency (ADR-004), a deliberately hostile mock PSP (timeouts that
-secretly charge, webhooks late/duplicated/out of order), payment intents →
-`ChargeJob`, an append-only balanced ledger, the subscription state
-machine, and the single `hasAccessTo` entitlement function. Webhook-edge
-hardening, reconciliation and IAP are Phase 4.
+**Phase 4 — Webhooks, reconciliation, IAP.** The webhook edge rebuilt as
+verify → persist raw → 200 → queue, with a signed-timestamp tolerance and a
+provider-event-id unique key; refunds and revocation; stale-transition
+rejection by the provider's clock; mock Apple App Store (ASSN v2 as
+ES256-signed JWS) and Play Store (RTDN over Pub/Sub) that own subscription
+state the way the real ones do (ADR-005); and hourly bidirectional
+reconciliation that converges state after dropped webhooks and reports how
+many discrepancies it fixed. Outbox and domain events are Phase 5.
 
 ## Running it
 
@@ -112,18 +114,123 @@ are off by a minor unit.
 ### The mock PSP
 
 `/mock-psp/*` (local tooling, `MOCKPSP_ENABLED`) is built to be hostile:
-idempotency keys honoured byte-exactly, webhooks delivered late, duplicated
-and out of order — and outcomes forced by amount convention:
+idempotency keys honoured byte-exactly, webhooks delivered late, duplicated,
+out of order and — `webhook.drop_rate` — sometimes never; outcomes forced by
+amount convention:
 
 | `amount_minor % 100` | Outcome |
 |---|---|
 | 1 | **timeout, but the charge succeeds** — the caller must not double-charge |
 | 2 | declined |
-| 3 | timeout, nothing recorded — settles only by reconciliation (Phase 4) |
+| 3 | timeout, nothing recorded — settles only by reconciliation |
 | other | succeeds (or random per `POST /mock-psp/config` rates) |
+
+It also has the provider's read side — `GET /mock-psp/v1/charges?since=`
+and `?idempotency_key=` — which is what reconciliation asks, and refunds:
+`POST /mock-psp/v1/charges/{id}/refunds {amount_minor?}` fires a
+`charge.refunded` webhook per refund.
 
 The chaos deliverable — random timeouts, duplicated and reordered webhooks,
 ledger exactly correct — runs as `tests/Feature/Billing/PaymentChaosTest.php`.
+
+## Webhooks
+
+Every provider-facing endpoint does the same four things, in this order:
+
+```
+verify   HMAC over "t.<raw body>" (X-Psp-Signature: t=…,v1=…), ±5 min;
+         Apple: ES256 JWS against the pinned key; Google: the Pub/Sub token
+persist  webhook_events, raw bytes, UNIQUE(provider, provider_event_id)
+200      "stored", not "understood" — a slow handler manufactures duplicates
+queue    ProcessWebhookEvent — dispatched when the row is still `pending`,
+         NOT when it was "just inserted": the difference is a process that
+         died between INSERT and dispatch, which the provider's retry heals
+```
+
+The handlers apply idempotently: charge outcomes through the Phase 3
+funnel, refunds through `ApplyRefund` (contra-revenue lines keyed on the
+refund id; a full refund revokes the subscription), store notifications
+through the projector below. Every row records its verdict (`applied`,
+`duplicate`, `stale`, `conflict`, `ignored`, …) so a delivery's fate is a
+query, not a log search.
+
+## In-app purchases (Apple / Google)
+
+The store owns the subscription; we hold a projection (ADR-005).
+
+```
+POST /v1/iap/apple/notifications          App Store Server Notifications V2
+POST /v1/iap/google/notifications?token=  Real-Time Developer Notifications (Pub/Sub push)
+POST /v1/iap/{apple|google}/sync          "restore purchases" — Bearer $BILLING_API_TOKEN
+                                          {"user_id": 1, "identifier": "<originalTransactionId | purchaseToken>"}
+```
+
+Apple's signed payload *is* the store speaking: verify, derive the
+absolute state from the signed transaction + renewal info, project. Google's
+RTDN is a hint: dedupe on `messageId`, **re-fetch** the purchase from the Play
+Developer API, project *that*, acknowledge. Both roads produce one
+`StoreSubscriptionSnapshot` and pass one guard — the store's clock against
+the row's `last_event_at` — so an older delivery loses whatever order it
+arrived in. The sync endpoint never grants from the claim: it re-fetches
+the identifier from the store and refuses one the store links elsewhere.
+
+The mock stores (`/mock-stores/*`, `MOCKSTORES_ENABLED`) stand in for a
+user tapping "subscribe" on a phone, and for the stores' server APIs:
+
+```bash
+TOKEN=$(docker compose exec app php artisan tinker --execute='echo App\Domain\Identity\Models\User::first()->app_account_token;')
+curl -s localhost:8100/mock-stores/apple/purchases -H 'Content-Type: application/json' \
+  -d "{\"product_id\":\"com.laremit.edtech.monthly\",\"app_account_token\":\"$TOKEN\"}"
+curl -s -X POST localhost:8100/mock-stores/apple/subscriptions/<originalTransactionId>/cancel   # renew|cancel|resume|expire|fail-payment|recover|refund|revoke
+curl -s localhost:8100/mock-stores/google/purchases -H 'Content-Type: application/json' \
+  -d "{\"product_id\":\"com.laremit.vpn.monthly\",\"obfuscated_external_account_id\":\"$TOKEN\"}"
+curl -s -X POST localhost:8100/mock-stores/google/purchases/<purchaseToken>/on-hold           # renew|cancel|restart|on-hold|grace|recover|expire|revoke|pause
+```
+
+Store product ids are `com.laremit.{product-slug}.{plan-slug}`. The mock
+App Store signs with a committed dev key (`MOCK_APPLE_SIGNING_KEY`) whose
+public half the app pins (`APPLE_ASSN_PUBLIC_KEY`); nothing real ever signs
+with it.
+
+## Reconciliation
+
+> Webhooks are an optimization; reconciliation is the source of truth.
+
+`php artisan billing:reconcile` (hourly from the scheduler, 26-hour
+overlapping window) runs four sweeps and persists the tally in
+`reconciliation_runs`:
+
+| Sweep | Direction | Fixes | Pages on |
+|---|---|---|---|
+| `PspChargeSweep` | theirs → ours | an intent the PSP settled but no webhook told us about; a refund we never booked | a charge for an intent we don't know; a settled intent the PSP contradicts (terminal wins, ADR-004) |
+| `StuckIntentSweep` | ours → theirs | an intent stuck `processing` that the PSP has a charge for under our key | one the PSP has never heard of, after `max_recovery_attempts` re-dispatches |
+| `StoreSubscriptionSweep` | store → us | any live Apple/Google row whose projection drifted | a row the store has no record of |
+| `PendingWebhookSweep` | — | re-queues a persisted delivery still `pending` past 5 min | — |
+
+It alerts on the *count* of what it could not fix (`Log::critical`), warns
+on what it did fix — a reconciliation that quietly repairs drift every hour
+is hiding a broken webhook path — and exits non-zero when anything is
+unresolved.
+
+### The Phase 4 deliverable — drop 20% of webhooks, converge in one run
+
+```bash
+curl -s -X POST localhost:8100/mock-psp/config    -H 'Content-Type: application/json' -d '{"webhook":{"drop_rate":0.2}}'
+curl -s -X POST localhost:8100/mock-stores/config -H 'Content-Type: application/json' -d '{"delivery":{"drop_rate":0.2}}'
+# ...drive purchases, refunds and store lifecycles (above), watch some intents stay `processing`
+# and some store rows fall behind; then:
+docker compose exec app php artisan billing:reconcile
+```
+
+The run prints what it scanned, what disagreed, and `Fixed: N` — exactly the
+discrepancies the drops caused. A second run prints `No discrepancies`. The
+same scenario runs mechanically, seeded, as
+`tests/Feature/Billing/ReconciliationChaosTest.php`: 30 PSP purchases in a
+forced mix plus refunds, 10 App Store and 10 Play Store subscriptions with a
+lifecycle each, a fifth of every notification dropped and a third of the
+rest duplicated and shuffled — one run converges everything it can see, and
+the client's restore call brings in the one thing it cannot (a store
+purchase whose every notification was lost).
 
 ## Event ingestion
 
@@ -212,12 +319,15 @@ app/
   Domain/
     Identity/   users — one identity across all products
     Catalog/    products, plans, billing intervals
-    Billing/    money, payment intents, ledger, state machine, entitlements
+    Billing/    money, payment intents, ledger, state machine, entitlements,
+                webhooks (edge + handlers), stores (IAP projection), reconciliation
     Events/     ingest, stream buffer, consumers, projections (Phase 2)
   MockPsp/      the pretend payment provider (hostile on purpose)
+  MockStores/   the pretend App Store and Play Store (they own the truth)
   Support/
     Health/     readiness checks
     Idempotency/ inbound idempotency records (ADR-004 layer 1)
+    Jws/        ES256 JWS compact serialization (no library, RFC 7515/7518)
 docker/
   app/          Dockerfile (FrankenPHP), Caddyfile, php.ini
   mysql/        my.cnf

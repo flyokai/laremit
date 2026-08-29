@@ -92,6 +92,11 @@ final readonly class MockPspSettings
         return (float) $this->value('webhook.duplicate_rate', 0.0);
     }
 
+    public function webhookDropRate(): float
+    {
+        return (float) $this->value('webhook.drop_rate', 0.0);
+    }
+
     private function value(string $key, mixed $default): mixed
     {
         $settings = $this->all();
