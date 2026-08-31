@@ -72,10 +72,8 @@ final readonly class StuckIntentSweep implements Sweep
                         continue;
                     }
 
-                    PaymentIntent::query()->whereKey($intent->id)->update([
-                        'recovery_attempts' => $intent->recovery_attempts + 1,
-                        'last_recovered_at' => $now,
-                    ]);
+                    PaymentIntent::query()->whereKey($intent->id)
+                        ->increment('recovery_attempts', 1, ['last_recovered_at' => $now]);
 
                     ChargeJob::dispatch($intent->id);
 
