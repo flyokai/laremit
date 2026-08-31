@@ -175,6 +175,42 @@ final readonly class RedisEventStream implements EventBuffer
         ], JSON_THROW_ON_ERROR));
     }
 
+    public function replayDeadLetters(int $limit): array
+    {
+        $conn = $this->conn();
+        $pops = min($limit, (int) $conn->llen($this->deadLetterKey));
+
+        $replayed = 0;
+        $kept = 0;
+
+        // RPOP takes the oldest (deadLetter LPUSHes); an unreplayable entry
+        // goes back on the head, which this bounded loop never revisits.
+        for ($i = 0; $i < $pops; $i++) {
+            $raw = $conn->rpop($this->deadLetterKey);
+
+            if (! is_string($raw)) {
+                break;
+            }
+
+            $envelope = $this->decodeDeadLetter($raw);
+
+            if ($envelope === null) {
+                $conn->lpush($this->deadLetterKey, $raw);
+                $kept++;
+
+                continue;
+            }
+
+            // A fresh stream entry: the delivery counter starts over, so a
+            // still-poisonous event earns its max_deliveries again before
+            // coming back here — replay can loop, but only by hand.
+            $this->append([$envelope]);
+            $replayed++;
+        }
+
+        return ['replayed' => $replayed, 'kept' => $kept];
+    }
+
     public function info(): array
     {
         try {
@@ -195,6 +231,26 @@ final readonly class RedisEventStream implements EventBuffer
     private function conn(): PhpRedisConnection
     {
         return PhpRedis::connection($this->redis, $this->connection);
+    }
+
+    /**
+     * A dead-letter record's envelope, if it still decodes. Records written
+     * for undecodable stream entries carry no envelope at all; anything else
+     * malformed here means the dead-letter store itself was corrupted.
+     */
+    private function decodeDeadLetter(string $raw): ?Envelope
+    {
+        try {
+            $record = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
+
+            if (! is_array($record) || ! is_array($record['envelope'] ?? null)) {
+                return null;
+            }
+
+            return Envelope::fromJson(json_encode($record['envelope'], JSON_THROW_ON_ERROR));
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

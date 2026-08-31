@@ -59,6 +59,18 @@ interface EventBuffer
     public function deadLetter(PendingEvent $event, string $reason): void;
 
     /**
+     * Re-enter dead-lettered entries into the stream, oldest first. Replay
+     * re-delivers to EVERY group — including ones that already processed the
+     * entry before it was poisoned for another — and that is fine by
+     * contract: consumers are idempotent, so re-delivery costs nothing. An
+     * entry whose stored envelope no longer decodes cannot be replayed and
+     * is kept in the dead-letter store for forensics.
+     *
+     * @return array{replayed: int, kept: int}
+     */
+    public function replayDeadLetters(int $limit): array;
+
+    /**
      * Operational snapshot for the status command.
      *
      * @return array<string, mixed>

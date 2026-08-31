@@ -7,6 +7,8 @@ namespace App\Domain\Billing\Subscriptions;
 use App\Domain\Billing\Enums\SubscriptionStatus;
 use App\Domain\Billing\Exceptions\InvalidTransition;
 use App\Domain\Billing\Models\Subscription;
+use App\Domain\Outbox\DomainEvent;
+use App\Domain\Outbox\Outbox;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
 
@@ -34,6 +36,13 @@ use Illuminate\Support\Facades\Log;
  * unique index MySQL doesn't have). Revoked is reachable from every live
  * state — refund, chargeback, store revocation — and nothing we initiate
  * leaves it.
+ *
+ * Every status change also publishes a domain event through the outbox
+ * (Phase 5), in the same transaction as the guarded write — which is why
+ * both write paths require the caller to already hold one; the Outbox
+ * refuses to publish otherwise. Being the single writer makes this the
+ * single publisher too: no lifecycle change can exist that the outbox
+ * didn't see.
  */
 final class SubscriptionStateMachine
 {
@@ -47,6 +56,8 @@ final class SubscriptionStateMachine
         SubscriptionStatus::Expired->value => [],
         SubscriptionStatus::Revoked->value => [],
     ];
+
+    public function __construct(private readonly Outbox $outbox) {}
 
     public function canTransition(SubscriptionStatus $from, SubscriptionStatus $to): bool
     {
@@ -93,6 +104,8 @@ final class SubscriptionStateMachine
         }
 
         $subscription->refresh();
+
+        $this->publishStatusChanged($subscription, $from, $at);
     }
 
     /**
@@ -183,6 +196,13 @@ final class SubscriptionStateMachine
 
         $subscription->refresh();
 
+        // Only a status CHANGE is an event. Most mirrors are the hourly
+        // re-sync confirming what we already knew; publishing those would be
+        // an hourly heartbeat wearing a fact's name.
+        if ($from !== $to) {
+            $this->publishStatusChanged($subscription, $from, $at);
+        }
+
         return true;
     }
 
@@ -194,6 +214,37 @@ final class SubscriptionStateMachine
     private static function clock(CarbonImmutable $at): string
     {
         return $at->utc()->format('Y-m-d H:i:s.v');
+    }
+
+    /**
+     * The one publisher for subscription lifecycle events, fed by both write
+     * paths after their guarded UPDATE succeeded — so a published event
+     * always describes a write that really happened, exactly once per write.
+     * The key is (row, new status, watermark): the same fact re-decided by a
+     * redelivered job maps to the same key and the outbox's unique index
+     * absorbs it. Payload is thin-plus (ADR-006).
+     */
+    private function publishStatusChanged(Subscription $subscription, SubscriptionStatus $from, CarbonImmutable $at): void
+    {
+        $to = $subscription->status;
+
+        $this->outbox->publish(new DomainEvent(
+            type: $to->domainEventType(),
+            aggregateType: 'subscription',
+            aggregateId: (string) $subscription->id,
+            idempotencyKey: sprintf('subscription:%d:%s:%s', $subscription->id, $to->value, self::clock($at)),
+            userId: $subscription->user_id,
+            product: $subscription->product->slug,
+            occurredAt: $at,
+            payload: [
+                'subscription_id' => $subscription->id,
+                'plan_id' => $subscription->plan_id,
+                'status' => $to->value,
+                'previous_status' => $from->value,
+                'store' => $subscription->store->value,
+                'current_period_end' => $subscription->current_period_end?->toISOString(),
+            ],
+        ));
     }
 
     /**

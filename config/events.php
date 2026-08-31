@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Billing\Jobs\ProjectBillingMetric;
 use App\Domain\Events\Consumers\ArchiveConsumer;
 use App\Domain\Events\Consumers\ProjectionConsumer;
 use App\Domain\Events\Consumers\ReactionConsumer;
@@ -157,7 +158,9 @@ return [
     | type => list of queued job classes, dispatched by the reactions consumer.
     | At-least-once: the reacted-marker is written after dispatch, so a crash
     | between the two re-dispatches on redelivery — reaction jobs must be
-    | idempotent. Billing wires its reactions here in Phase 3 (tech-debt #9).
+    | idempotent. The billing.* types are the Phase 5 outbox's domain events
+    | (tech-debt #9, paid): ProjectBillingMetric buys its idempotency with
+    | consumption markers, since a counter increment has none of its own.
     |
     */
 
@@ -165,7 +168,12 @@ return [
         'marker_prefix' => 'events:reacted:',
         'marker_ttl' => (int) env('EVENTS_REACTION_MARKER_TTL', 86_400),
         'map' => [
-            // 'payment.failed' => [\App\Domain\Billing\Jobs\HandlePaymentFailure::class],
+            'billing.payment.succeeded' => [ProjectBillingMetric::class],
+            'billing.payment.failed' => [ProjectBillingMetric::class],
+            'billing.payment.refunded' => [ProjectBillingMetric::class],
+            'billing.subscription.activated' => [ProjectBillingMetric::class],
+            'billing.subscription.canceled' => [ProjectBillingMetric::class],
+            'billing.subscription.revoked' => [ProjectBillingMetric::class],
         ],
     ],
 

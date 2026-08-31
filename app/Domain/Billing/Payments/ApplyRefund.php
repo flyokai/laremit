@@ -10,6 +10,8 @@ use App\Domain\Billing\Ledger\Ledger;
 use App\Domain\Billing\Models\PaymentIntent;
 use App\Domain\Billing\Money\Money;
 use App\Domain\Billing\Subscriptions\SubscriptionStateMachine;
+use App\Domain\Outbox\DomainEvent;
+use App\Domain\Outbox\Outbox;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -36,6 +38,7 @@ final readonly class ApplyRefund
     public function __construct(
         private Ledger $ledger,
         private SubscriptionStateMachine $subscriptions,
+        private Outbox $outbox,
     ) {}
 
     public function apply(PspRefundEvent $event): string
@@ -114,6 +117,29 @@ final readonly class ApplyRefund
             ]);
 
             $intent->refresh();
+
+            // Keyed on the refund id like the ledger lines: two partial
+            // refunds are two facts, and only reached when recordRefund
+            // reported this one as new.
+            $this->outbox->publish(new DomainEvent(
+                type: 'billing.payment.refunded',
+                aggregateType: 'payment_intent',
+                aggregateId: (string) $intent->id,
+                idempotencyKey: "refund:{$event->refundId}",
+                userId: $intent->user_id,
+                product: $intent->plan->product->slug,
+                occurredAt: $event->occurredAt,
+                payload: [
+                    'payment_intent_id' => $intent->id,
+                    'subscription_id' => $intent->subscription_id,
+                    'refund_id' => $event->refundId,
+                    'charge_id' => $event->chargeId,
+                    'amount_minor' => $event->amountMinor,
+                    'currency' => $event->currency,
+                    'refunded_minor_total' => $intent->refunded_minor,
+                    'fully_refunded' => $intent->isFullyRefunded(),
+                ],
+            ));
 
             if ($intent->isFullyRefunded()) {
                 $this->revokeSubscription($intent, $event);

@@ -67,4 +67,24 @@ enum SubscriptionStatus: string
             default => false,
         };
     }
+
+    /**
+     * The domain event published when a subscription ENTERS this state
+     * (Phase 5). Event names are facts, not states — "activated", not
+     * "active" — because a consumer reads them as history, and history is
+     * written in the past tense.
+     */
+    public function domainEventType(): string
+    {
+        return match ($this) {
+            self::Incomplete => 'billing.subscription.pending',
+            self::Trialing => 'billing.subscription.trial_started',
+            self::Active => 'billing.subscription.activated',
+            self::PastDue => 'billing.subscription.past_due',
+            self::Paused => 'billing.subscription.paused',
+            self::Canceled => 'billing.subscription.canceled',
+            self::Expired => 'billing.subscription.expired',
+            self::Revoked => 'billing.subscription.revoked',
+        };
+    }
 }

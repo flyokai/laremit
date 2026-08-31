@@ -11,7 +11,7 @@ rewritten is a decision nobody can be held to.
 | [0003](0003-redis-streams-over-kafka.md) | Redis Streams as the event buffer, with a named Kafka trigger | Accepted | 2 |
 | [0004](0004-idempotency-across-three-layers.md) | Idempotency at every layer money crosses | Accepted | 3 |
 | [0005](0005-store-as-source-of-truth-for-iap.md) | The app store is the source of truth for IAP; we hold a projection | Accepted | 4 |
-| 0006 | Thin vs fat event payloads | Planned | 5 |
+| [0006](0006-thin-plus-event-payloads-through-the-outbox.md) | Thin-plus domain events, through a transactional outbox onto the shared stream | Accepted | 5 |
 | 0007 | Queue topology and isolation guarantees | Planned | 6 |
 | 0008 | Octane adoption, with the audit checklist | Planned | 8 |
 

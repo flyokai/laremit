@@ -27,6 +27,14 @@ final class ProjectionConsumer implements Consumer
     /** SETBIT's hard ceiling is a 512MB value: offsets up to 2^32 - 1. */
     private const MAX_BITMAP_OFFSET = 4_294_967_295;
 
+    /**
+     * Domain events (Phase 5 outbox) ride the same stream but are the
+     * platform's facts, not the user's behavior: a renewal fired by a store
+     * re-sync must not mark its user "active today". DAU counts what people
+     * did, so server-emitted billing events are skipped here.
+     */
+    private const DOMAIN_EVENT_PREFIX = 'billing.';
+
     private bool $warnedAboutOffset = false;
 
     public function __construct(
@@ -37,6 +45,11 @@ final class ProjectionConsumer implements Consumer
 
     public function apply(array $envelopes): void
     {
+        $envelopes = array_filter(
+            $envelopes,
+            static fn ($envelope): bool => ! str_starts_with($envelope->type, self::DOMAIN_EVENT_PREFIX),
+        );
+
         if ($envelopes === []) {
             return;
         }

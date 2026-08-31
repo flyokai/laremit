@@ -7,6 +7,7 @@ namespace Tests\Support;
 use App\Domain\Events\Contracts\EventBuffer;
 use App\Domain\Events\Stream\PendingEvent;
 use App\Domain\Events\Support\Envelope;
+use RuntimeException;
 
 /**
  * In-memory EventBuffer with the same observable semantics as the Redis
@@ -34,6 +35,13 @@ final class FakeEventBuffer implements EventBuffer
     /** @var list<array{PendingEvent, string}> */
     public array $deadLettered = [];
 
+    /**
+     * When set, append() takes the events — they ARE on the stream, exactly
+     * as Redis would hold them — and then throws with this message: the
+     * "relay killed between publish and mark-dispatched" chaos switch.
+     */
+    public ?string $dieAfterAppend = null;
+
     private int $sequence = 0;
 
     public function depth(): int
@@ -55,6 +63,10 @@ final class FakeEventBuffer implements EventBuffer
             $this->appended[] = $envelope;
             $this->seen[$envelope->eventId] = true;
             $this->depth++;
+        }
+
+        if ($this->dieAfterAppend !== null && $envelopes !== []) {
+            throw new RuntimeException($this->dieAfterAppend);
         }
     }
 
@@ -92,6 +104,29 @@ final class FakeEventBuffer implements EventBuffer
     public function deadLetter(PendingEvent $event, string $reason): void
     {
         $this->deadLettered[] = [$event, $reason];
+    }
+
+    public function replayDeadLetters(int $limit): array
+    {
+        $replayed = 0;
+        $kept = [];
+
+        foreach ($this->deadLettered as $entry) {
+            [$event] = $entry;
+
+            if ($event->envelope === null || $replayed >= $limit) {
+                $kept[] = $entry;
+
+                continue;
+            }
+
+            $this->append([$event->envelope]);
+            $replayed++;
+        }
+
+        $this->deadLettered = $kept;
+
+        return ['replayed' => $replayed, 'kept' => count($kept)];
     }
 
     public function info(): array

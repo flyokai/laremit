@@ -6,6 +6,7 @@ namespace App\Domain\Events;
 
 use App\Domain\Events\Console\CheckLagCommand;
 use App\Domain\Events\Console\PartitionsCommand;
+use App\Domain\Events\Console\ReplayDeadLettersCommand;
 use App\Domain\Events\Console\StatusCommand;
 use App\Domain\Events\Console\WorkCommand;
 use App\Domain\Events\Consumers\ProjectionConsumer;
@@ -127,6 +128,7 @@ final class EventsServiceProvider extends ServiceProvider
                 PartitionsCommand::class,
                 StatusCommand::class,
                 CheckLagCommand::class,
+                ReplayDeadLettersCommand::class,
             ]);
         }
     }

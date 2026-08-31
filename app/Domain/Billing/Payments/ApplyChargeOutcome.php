@@ -9,6 +9,8 @@ use App\Domain\Billing\Enums\SubscriptionStatus;
 use App\Domain\Billing\Ledger\Ledger;
 use App\Domain\Billing\Models\PaymentIntent;
 use App\Domain\Billing\Subscriptions\SubscriptionStateMachine;
+use App\Domain\Outbox\DomainEvent;
+use App\Domain\Outbox\Outbox;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -34,6 +36,7 @@ final readonly class ApplyChargeOutcome
     public function __construct(
         private Ledger $ledger,
         private SubscriptionStateMachine $subscriptions,
+        private Outbox $outbox,
     ) {}
 
     public function apply(PspEvent $event): string
@@ -105,6 +108,11 @@ final readonly class ApplyChargeOutcome
 
             $intent->refresh();
 
+            // Same transaction as the settle itself (the outbox insists):
+            // the event exists if and only if the intent really moved, and
+            // the single-shot guard above makes it one event per intent, ever.
+            $this->publishSettled($intent, $event);
+
             if ($event->succeeded()) {
                 // The ledger's unique keys make this safe even if every guard
                 // above were deleted; with the guards it records exactly once.
@@ -115,6 +123,30 @@ final readonly class ApplyChargeOutcome
 
             return 'applied';
         });
+    }
+
+    private function publishSettled(PaymentIntent $intent, PspEvent $event): void
+    {
+        $this->outbox->publish(new DomainEvent(
+            type: $event->succeeded() ? 'billing.payment.succeeded' : 'billing.payment.failed',
+            aggregateType: 'payment_intent',
+            aggregateId: (string) $intent->id,
+            // "This intent settled" is one fact regardless of which way it
+            // went — the terminal-wins guard means it can only go one way.
+            idempotencyKey: "payment:{$intent->id}:settled",
+            userId: $intent->user_id,
+            product: $intent->plan->product->slug,
+            occurredAt: $event->occurredAt,
+            payload: [
+                'payment_intent_id' => $intent->id,
+                'subscription_id' => $intent->subscription_id,
+                'plan_id' => $intent->plan_id,
+                'amount_minor' => $intent->amount_minor,
+                'currency' => $intent->currency,
+                'charge_id' => $event->chargeId,
+                'decline_code' => $event->succeeded() ? null : $intent->last_error,
+            ],
+        ));
     }
 
     private function activateSubscription(PaymentIntent $intent, PspEvent $event): void

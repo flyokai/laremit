@@ -95,6 +95,20 @@ services:
       # Liveness here is the process itself; restart policy covers exits.
       disable: true
 
+  # Outbox relay (Phase 5): claims committed outbox rows with SKIP LOCKED and
+  # republishes them into the event stream. Parallel-safe by construction —
+  # scale with `docker compose up -d --scale relay-outbox=2`; a peer simply
+  # skips whatever rows another relay holds locked.
+  relay-outbox:
+    <<: *app
+    command: ['php', 'artisan', 'outbox:relay']
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    healthcheck:
+      # The base image healthcheck probes Caddy, which workers do not run.
+      # Liveness here is the process itself; restart policy covers exits.
+      disable: true
+
   scheduler:
     <<: *app
     command: ['php', 'artisan', 'schedule:work']

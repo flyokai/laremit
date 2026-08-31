@@ -109,6 +109,42 @@ function pspRefundEvent(App\Domain\Billing\Models\PaymentIntent $intent, ?int $a
 }
 
 /**
+ * A valid domain event for outbox tests; override only what the case is
+ * about. Keys default to unique so tests create as many facts as they mean to.
+ *
+ * @param  array<string, mixed>  $overrides
+ */
+function outboxDomainEvent(array $overrides = []): App\Domain\Outbox\DomainEvent
+{
+    $arguments = array_merge([
+        'type' => 'billing.subscription.activated',
+        'aggregateType' => 'subscription',
+        'aggregateId' => '1',
+        'idempotencyKey' => 'test:'.Illuminate\Support\Str::ulid(),
+        'userId' => 7,
+        'product' => 'edtech',
+        'occurredAt' => Carbon\CarbonImmutable::now(),
+        'payload' => ['subscription_id' => 1],
+    ], $overrides);
+
+    return new App\Domain\Outbox\DomainEvent(...$arguments);
+}
+
+/**
+ * Swap the event buffer for the in-memory fake and return it, so outbox and
+ * relay tests observe the stream without Redis. Must run before anything
+ * resolves the Ingestor.
+ */
+function fakeEventBuffer(?Tests\Support\FakeEventBuffer $buffer = null): Tests\Support\FakeEventBuffer
+{
+    $buffer ??= new Tests\Support\FakeEventBuffer;
+
+    app()->instance(App\Domain\Events\Contracts\EventBuffer::class, $buffer);
+
+    return $buffer;
+}
+
+/**
  * Take every store notification the mocks have queued, reset the fake,
  * and deliver them to the app in the given order (default: as queued).
  * Returns the responses so a test can inspect the duplicate flag.
