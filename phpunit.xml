@@ -28,6 +28,9 @@
         <env name="DB_URL" value=""/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <!-- Jobs pinned to a lane connection (ADR-007) ignore QUEUE_CONNECTION,
+             so the lanes carry their own sync switch for the suite. -->
+        <env name="QUEUE_LANES_DRIVER" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="EVENTS_INGEST_TOKEN" value="test-token"/>
         <env name="BILLING_API_TOKEN" value="test-billing-token"/>
@@ -58,6 +61,12 @@
         <env name="REDIS_CACHE_HOST" value="127.0.0.1"/>
         <env name="REDIS_CACHE_PORT" value="6301"/>
         <env name="REDIS_CACHE_DB" value="9"/>
+        <!-- The flood-command integration test pushes real payloads to the
+             queue instance, same database-9-plus-test-prefix isolation. -->
+        <env name="REDIS_QUEUE_HOST" value="127.0.0.1"/>
+        <env name="REDIS_QUEUE_PORT" value="6302"/>
+        <env name="REDIS_QUEUE_DB" value="9"/>
+        <env name="HORIZON_PREFIX" value="laremit-test-horizon:"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

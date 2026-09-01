@@ -31,6 +31,9 @@ final class ProjectBillingMetric implements ShouldQueue
 
     public int $tries = 3;
 
+    /** Must stay under the events connection's retry_after. */
+    public int $timeout = 30;
+
     /** @var list<int> */
     public array $backoff = [5, 30];
 
@@ -43,7 +46,13 @@ final class ProjectBillingMetric implements ShouldQueue
         'billing.subscription.revoked' => 'revocations',
     ];
 
-    public function __construct(public Envelope $envelope) {}
+    // The events lane (ADR-007): reaction volume rides client-event volume,
+    // which is exactly the traffic that must never sit in front of a charge.
+    public function __construct(public Envelope $envelope)
+    {
+        $this->onConnection('events');
+        $this->onQueue('events');
+    }
 
     public function handle(): void
     {

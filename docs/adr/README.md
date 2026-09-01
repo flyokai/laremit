@@ -12,7 +12,7 @@ rewritten is a decision nobody can be held to.
 | [0004](0004-idempotency-across-three-layers.md) | Idempotency at every layer money crosses | Accepted | 3 |
 | [0005](0005-store-as-source-of-truth-for-iap.md) | The app store is the source of truth for IAP; we hold a projection | Accepted | 4 |
 | [0006](0006-thin-plus-event-payloads-through-the-outbox.md) | Thin-plus domain events, through a transactional outbox onto the shared stream | Accepted | 5 |
-| 0007 | Queue topology and isolation guarantees | Planned | 6 |
+| [0007](0007-queue-topology-and-isolation.md) | Three queue lanes on one Redis — isolation by supervisor, connection and retry_after | Accepted | 6 |
 | 0008 | Octane adoption, with the audit checklist | Planned | 8 |
 
 ## Template

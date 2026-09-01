@@ -26,10 +26,21 @@ final class DeliverPspWebhook implements ShouldQueue
     /** @var list<int> */
     public array $backoff = [5, 15];
 
+    /** Must stay under the bulk connection's retry_after. */
+    public int $timeout = 30;
+
     /**
      * @param  array<string, mixed>  $payload
      */
-    public function __construct(public array $payload) {}
+    public function __construct(public array $payload)
+    {
+        // The bulk lane (ADR-007): the mock PSP is the simulated outside
+        // world, and the outside world does not get to ride our payments
+        // lane. A slow delivery here is just a late webhook — a condition
+        // Phase 4 already survives by design.
+        $this->onConnection('bulk');
+        $this->onQueue('bulk');
+    }
 
     public function handle(Http $http, MockPspSettings $settings): void
     {

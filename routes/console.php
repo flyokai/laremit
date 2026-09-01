@@ -38,3 +38,15 @@ Schedule::command('billing:reconcile')->hourly()->withoutOverlapping()->onOneSer
 // backlog's age (the symptom), not the relay process (the cause) — same
 // posture as events:check-lag.
 Schedule::command('outbox:status', ['--check'])->everyFiveMinutes();
+
+// Queue depth watchdog (Phase 6, ADR-007). Horizon's wait-time thresholds
+// (horizon.waits) are the primary alert; this is the depth backstop, and the
+// one that still fires with Horizon itself down. Two invocations because one
+// --max fits all lanes about as well as one shoe: 500 payments jobs is a
+// charge backlog worth waking someone for, 500 reactions is a quiet Tuesday.
+// QueueBusy → Log::critical via QueueServiceProvider.
+Schedule::command('queue:monitor', ['payments:payments', '--max' => 500])->everyMinute();
+Schedule::command('queue:monitor', ['events:events,bulk:bulk,bulk:default', '--max' => 100000])->everyMinute();
+
+// Horizon's metrics graphs are only as real as their snapshots.
+Schedule::command('horizon:snapshot')->everyFiveMinutes();

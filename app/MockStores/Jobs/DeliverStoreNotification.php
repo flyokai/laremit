@@ -26,11 +26,21 @@ final class DeliverStoreNotification implements ShouldQueue
     /** @var list<int> */
     public array $backoff = [5, 15];
 
+    /** Must stay under the bulk connection's retry_after. */
+    public int $timeout = 30;
+
     public function __construct(
         public Store $store,
         public string $body,
         public string $eventId,
-    ) {}
+    ) {
+        // The bulk lane (ADR-007), same reasoning as the mock PSP's
+        // deliveries: simulated third parties stay off the payments lane,
+        // and a delayed notification is a scenario the stale-transition
+        // rejection already handles.
+        $this->onConnection('bulk');
+        $this->onQueue('bulk');
+    }
 
     public function handle(Http $http, MockStoresSettings $settings): void
     {

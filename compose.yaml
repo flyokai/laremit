@@ -43,7 +43,12 @@ services:
     <<: *app
     command: ['php', 'artisan', 'horizon']
     stop_signal: SIGTERM
-    stop_grace_period: 60s
+    # The grace period must exceed the longest job timeout across all three
+    # supervisors (bulk: 300s), or the orchestrator SIGKILLs a worker
+    # mid-job on deploy — the queues survive that (retry_after re-delivers),
+    # but graceful drain is the whole point of SIGTERM. In practice exits
+    # are fast; the full period is only ever spent with a long job in flight.
+    stop_grace_period: 330s
     healthcheck:
       test: ['CMD', 'php', 'artisan', 'horizon:status']
       interval: 15s

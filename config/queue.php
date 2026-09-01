@@ -67,13 +67,75 @@ return [
         ],
 
         // Pinned to the dedicated queue Redis instance (noeviction + AOF), never
-        // the shared cache instance. Phase 6 splits this into per-workload
-        // connections — payments, events, bulk — with their own retry_after.
+        // the shared cache instance. Still the default connection: anything
+        // dispatched without a lane lands on `default`, which the bulk
+        // supervisor drains — unclassified work is bulk by definition (ADR-007).
         'redis' => [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'queue'),
             'queue' => env('REDIS_QUEUE', 'default'),
             'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
+        /*
+        |----------------------------------------------------------------------
+        | The three lanes (Phase 6, ADR-007)
+        |----------------------------------------------------------------------
+        |
+        | Same physical Redis instance, three logical connections — because
+        | retry_after is a per-CONNECTION setting, and it is the visibility
+        | timeout: a reserved job whose worker dies reappears after exactly
+        | retry_after seconds, whether or not the worker is still running.
+        | The invariant, per lane: retry_after > the slowest job's timeout,
+        | with margin — otherwise a second worker starts a charge the first
+        | is still making. QueueTopologyTest enforces this against the
+        | Horizon supervisors.
+        |
+        | payments  money movement (ChargeJob, webhook application). Tight
+        |           timeouts, tight retry_after: fast redelivery when a worker
+        |           dies mid-charge is what the PSP idempotency key exists to
+        |           make safe. block_for: a blocking pop shaves the worker's
+        |           sleep interval off charge pickup latency.
+        | events    domain reactions off the stream. High volume, short jobs,
+        |           tightest retry_after for the fastest crash redelivery.
+        | bulk      everything slow or unclassified, so the lanes above never
+        |           inherit a long job's visibility timeout. Also drains
+        |           `default`.
+        |
+        | QUEUE_LANES_DRIVER exists for the test suite, which swaps the lanes
+        | to sync — a job pinned to a named connection ignores
+        | QUEUE_CONNECTION, so the usual sync-in-tests convention needs this
+        | second knob.
+        |
+        */
+
+        'payments' => [
+            'driver' => env('QUEUE_LANES_DRIVER', 'redis'),
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'queue'),
+            'queue' => 'payments',
+            'retry_after' => (int) env('QUEUE_PAYMENTS_RETRY_AFTER', 90),
+            'block_for' => 2,
+            // Belt to the explicit ->afterCommit() at the dispatch sites: no
+            // payments-lane job is ever visible before its intent row commits.
+            'after_commit' => true,
+        ],
+
+        'events' => [
+            'driver' => env('QUEUE_LANES_DRIVER', 'redis'),
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'queue'),
+            'queue' => 'events',
+            'retry_after' => (int) env('QUEUE_EVENTS_RETRY_AFTER', 60),
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
+        'bulk' => [
+            'driver' => env('QUEUE_LANES_DRIVER', 'redis'),
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'queue'),
+            'queue' => 'bulk',
+            'retry_after' => (int) env('QUEUE_BULK_RETRY_AFTER', 330),
             'block_for' => null,
             'after_commit' => false,
         ],

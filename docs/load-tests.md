@@ -41,3 +41,52 @@ re-applied under `INSERT IGNORE` — no loss, no double-count.
 (≤200 rows/statement) drained in real time; stream depth stayed flat during
 steady state and recovered within seconds of the worker restart. The p99 gap
 (17ms vs 50ms budget) is the room the 20k/s burst target will spend.
+
+## Phase 6 deliverable — 2026-09-01
+
+**Target:** flood the events queue with 1,000,000 jobs; prove payment p99 is
+unaffected (ADR-007's isolation claim, measured).
+
+**Setup (same caveats as Phase 2):** dev Docker image, single app container,
+load generator (`load/payments-p99.php`, curl_multi constant-arrival) on the
+same machine, MySQL and all Redis instances on the same box. Every payment
+request is a real purchase against a pre-seeded fresh user (raw-insert
+seeding, ids 6–40005): unique `Idempotency-Key`, 202 with an intent id, a
+`ChargeJob` on the payments lane, mock-PSP charge over HTTP, webhook back
+through the bulk lane, `ProcessWebhookEvent` on the payments lane.
+
+**Run:** baseline 25 req/s × 60s → `queue:flood 1000000` → identical 25 req/s
+× 60s while the events lane held a ~1M backlog.
+
+| Metric | Baseline | During 1M-job flood |
+|---|---|---|
+| Requests (all 202) | 1,500 / 1,500 | 1,500 / 1,500 |
+| p50 / p90 / p95 | 16.2 / 19.5 / 20.6 ms | 17.5 / 21.7 / 23.5 ms |
+| **payment p99** | **23.1 ms** | **28.2 ms** |
+| max | 107.8 ms | 102.7 ms |
+| events queue **wait** | ~0 | **727 s** |
+| payments queue **wait** | 0 s | **0 s** |
+| intents settled | all | **all** (3,007 succeeded, 0 in flight) |
+
+The flood itself: 1,000,000 `SyntheticEventJob` payloads pushed in **2.4s**
+(420k jobs/sec, pipelined multi-value `RPUSH` of a real payload template —
+see `queue:flood`'s docblock for why it bypasses the Queue facade). Queue
+Redis peaked at **666 MB** — past the old 512 MB ceiling, which is why
+ADR-007 amends it to 2 GB. Horizon autoscaled `supervisor-events` to its max
+6 workers (drain ≈ 1,100 jobs/s) while `supervisor-payments` sat untouched
+at 1 process with zero wait; the ~5ms p99 shift is the two extra
+worker-fleets' CPU on a shared box, not queueing.
+
+**Alerting outcome:** both watchdogs fired unattended, for the right lane
+and only that lane — the scheduled `queue:monitor` logged critical
+(`QueueBusy` on `events:events`) every minute from 17:50:01 until depth
+fell back under 100k at 18:05, and Horizon's `LongWaitDetected` logged
+critical at wait 773s on `events:events`. `payments:payments` (thresholds:
+500 deep / 30s wait) stayed silent throughout, because it was never behind.
+
+**Drain:** the full backlog cleared in ~18 minutes (≈920 jobs/s average)
+with **zero** `failed_jobs`. Queue Redis read 1.23 GB just after the drain
+— payloads gone, an hour of Horizon's per-job metering still resident —
+which is the observation that retires the old 512 MB ceiling for good. The
+breaker never opened (the PSP was healthy — its behavior is pinned by
+`tests/Feature/Queue/CircuitBreakerTest.php`).

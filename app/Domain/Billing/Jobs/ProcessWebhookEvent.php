@@ -6,15 +6,18 @@ namespace App\Domain\Billing\Jobs;
 
 use App\Domain\Billing\Enums\Store;
 use App\Domain\Billing\Enums\WebhookEventStatus;
+use App\Domain\Billing\Exceptions\StoreUnavailable;
 use App\Domain\Billing\Models\WebhookEvent;
 use App\Domain\Billing\Webhooks\Handlers\AppleNotificationHandler;
 use App\Domain\Billing\Webhooks\Handlers\GoogleNotificationHandler;
 use App\Domain\Billing\Webhooks\Handlers\PspWebhookHandler;
 use App\Domain\Billing\Webhooks\WebhookHandler;
 use Carbon\CarbonImmutable;
+use DateTimeInterface;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\ThrottlesExceptions;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -25,20 +28,39 @@ use Throwable;
  * guard: a job that finds anything but `pending` returns, so the reaper
  * and a duplicate dispatch cost nothing.
  *
- * Exceptions are transient by contract (WebhookHandler): the queue retries
- * with backoff, and when it gives up the row is marked failed with the
- * reason — reconciliation is the backstop, not a retry loop.
+ * Rides the payments lane (ADR-007): applying a charge outcome is money
+ * movement, and it must not queue behind a reactions backlog.
+ *
+ * The retry budget is a deadline plus an exception cap, not $tries: the
+ * store circuit breaker below and the wantsRetry release loop both burn
+ * attempts without doing work, so counting attempts would fail rows the
+ * job never really tried. Two hours of releases, at most eight actual
+ * handler exceptions, then the row is marked failed — reconciliation is
+ * the backstop, not a retry loop (WebhookHandler's contract: exceptions
+ * are transient by definition).
  */
 final class ProcessWebhookEvent implements ShouldQueue
 {
     use Queueable;
 
-    public int $tries = 4;
+    public int $maxExceptions = 8;
+
+    /** Must stay under the payments connection's retry_after. */
+    public int $timeout = 60;
 
     /** @var list<int> */
     public array $backoff = [5, 30, 120];
 
-    public function __construct(public int $webhookEventId) {}
+    public function __construct(public int $webhookEventId)
+    {
+        $this->onConnection('payments');
+        $this->onQueue('payments');
+    }
+
+    public function retryUntil(): DateTimeInterface
+    {
+        return CarbonImmutable::now()->addHours(2);
+    }
 
     /**
      * @return list<object>
@@ -46,6 +68,16 @@ final class ProcessWebhookEvent implements ShouldQueue
     public function middleware(): array
     {
         return [
+            // Store-connectivity breaker, keyed apart from the PSP's: the
+            // app stores and the PSP fail independently, so tripping one
+            // must not park the other's jobs. StoreUnavailable only — a
+            // handler's own bug should fail fast through maxExceptions,
+            // not masquerade as an outage. Matched throws are swallowed
+            // and released a minute out, breaker-paced.
+            (new ThrottlesExceptions(10, 10 * 60))
+                ->by('stores')
+                ->backoff(1)
+                ->when(static fn (Throwable $e): bool => $e instanceof StoreUnavailable),
             (new WithoutOverlapping("webhook:{$this->webhookEventId}"))
                 ->releaseAfter(10)
                 ->expireAfter(300),

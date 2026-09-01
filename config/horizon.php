@@ -100,8 +100,17 @@ return [
     |
     */
 
+    // Wait TIME is the signal, not depth: depth without wait is a queue doing
+    // its job; rising wait means we are falling behind (module 5). Horizon
+    // fires LongWaitDetected past these, and QueueServiceProvider turns that
+    // into a critical log (the pager arrives in Phase 9 — tech-debt #19).
+    // Thirty seconds is an eternity for a payment and a rounding error for a
+    // bulk import; that asymmetry is the whole topology, restated as alerts.
     'waits' => [
-        'redis:default' => 60,
+        'payments:payments' => 30,
+        'events:events' => 300,
+        'bulk:bulk' => 900,
+        'bulk:default' => 900,
     ],
 
     /*
@@ -135,8 +144,11 @@ return [
     |
     */
 
+    // The flood demo pushes a million SyntheticEventJobs; recording each one
+    // in the completed list would spend the queue instance's memory on
+    // bookkeeping for jobs whose entire point is volume.
     'silenced' => [
-        // App\Jobs\ExampleJob::class,
+        App\Support\Queue\Jobs\SyntheticEventJob::class,
     ],
 
     'silenced_tags' => [
@@ -200,12 +212,22 @@ return [
     |
     */
 
+    // Three supervisors, one per lane (ADR-007). Isolation is the point:
+    // worker pools, timeouts and scaling limits are per-lane, so a million
+    // queued reactions cannot borrow a single payments worker. Each
+    // supervisor's `timeout` must stay under its connection's retry_after
+    // (config/queue.php) — QueueTopologyTest enforces the pairing.
+    //
+    // `tries` here is only the default for a job that declares nothing; every
+    // real job in this codebase carries its own retry policy, so the floor
+    // stays at 1 — an unclassified stray gets one attempt, not a silent five.
     'defaults' => [
-        'supervisor-1' => [
-            'connection' => 'redis',
-            'queue' => ['default'],
+        'supervisor-payments' => [
+            'connection' => 'payments',
+            'queue' => ['payments'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
+            'minProcesses' => 1,
             'maxProcesses' => 1,
             'maxTime' => 0,
             'maxJobs' => 0,
@@ -214,20 +236,71 @@ return [
             'timeout' => 60,
             'nice' => 0,
         ],
+
+        'supervisor-events' => [
+            'connection' => 'events',
+            'queue' => ['events'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => 1,
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => 30,
+            'nice' => 5,
+        ],
+
+        // Long or unclassified work, `default` included: a lane whose
+        // generous timeout would poison retry_after anywhere else. nice 10:
+        // when the box is saturated, bulk yields the CPU first.
+        'supervisor-bulk' => [
+            'connection' => 'bulk',
+            'queue' => ['bulk', 'default'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => 1,
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => 300,
+            'nice' => 10,
+        ],
     ],
 
     'environments' => [
         'production' => [
-            'supervisor-1' => [
+            'supervisor-payments' => [
+                'minProcesses' => 2,
                 'maxProcesses' => 10,
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            'supervisor-events' => [
+                'minProcesses' => 2,
+                'maxProcesses' => 20,
+                'balanceMaxShift' => 2,
+                'balanceCooldown' => 3,
+            ],
+            'supervisor-bulk' => [
+                'maxProcesses' => 4,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 5,
+            ],
         ],
 
         'local' => [
-            'supervisor-1' => [
+            'supervisor-payments' => [
                 'maxProcesses' => 3,
+            ],
+            'supervisor-events' => [
+                'maxProcesses' => 6,
+            ],
+            'supervisor-bulk' => [
+                'maxProcesses' => 2,
             ],
         ],
     ],
