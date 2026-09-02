@@ -48,6 +48,10 @@ measurement; CI adds cache-restore and service-boot overhead on top.
   against `php -S` with a 25-worker pool, throwaway MySQL database) →
   exactly one charge. Asserts invariants, not interleavings. Skips cleanly
   when MySQL is unreachable, same posture as the Redis tests.
+- `tests/Feature/Octane` — the interleaved-user leak test (ADR-008): the
+  real Octane `Worker` in a child process (sqlite, no external services, so
+  it rides the fast tier), asserting both that `scoped()` never leaks a
+  user across requests and that the planted warm-singleton leak IS caught.
 
 `Http::preventStrayRequests()` is global: no test can silently talk to the
 network. The concurrency suite talks to a server it booted itself, over raw

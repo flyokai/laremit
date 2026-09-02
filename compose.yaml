@@ -30,6 +30,25 @@ services:
     <<: *app
     environment:
       SERVER_NAME: ':8080'
+      # Octane worker mode (Phase 8, ADR-008): FrankenPHP keeps the framework
+      # booted between requests. Two halves, one mode: FRANKENPHP_CONFIG
+      # registers the worker script, FRANKENPHP_INDEX routes requests to it
+      # (see docker/app/Caddyfile). The `-` (not `:-`) defaults matter — an
+      # explicitly EMPTY variable passes through and yields classic mode:
+      #   FRANKENPHP_CONFIG= FRANKENPHP_INDEX= docker compose up -d app
+      # which is how the before/after rows in docs/load-tests.md are produced.
+      # In worker mode the container no longer picks up code edits per
+      # request; `docker compose restart app` after changing code or .env.
+      FRANKENPHP_CONFIG: ${FRANKENPHP_CONFIG-worker /app/public/frankenphp-worker.php}
+      FRANKENPHP_INDEX: ${FRANKENPHP_INDEX-frankenphp-worker.php}
+      # Worker recycle ceiling: bounds any slow per-process leak, and recycling
+      # is cheap because replacement workers boot from opcache. Keep it high
+      # enough that the amortized reboot cost stays invisible at p99.
+      MAX_REQUESTS: ${OCTANE_MAX_REQUESTS:-1000}
+      # The ADR-008 planted leak, one command to arm and self-restoring on the
+      # next plain `up -d`:
+      #   OCTANE_DEMO_CROSS_REQUEST_LEAK=true docker compose up -d app
+      OCTANE_DEMO_CROSS_REQUEST_LEAK: ${OCTANE_DEMO_CROSS_REQUEST_LEAK:-false}
     ports:
       - '${APP_PORT:-8100}:8080'
     healthcheck:

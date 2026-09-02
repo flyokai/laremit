@@ -2,8 +2,10 @@
 	{$CADDY_GLOBAL_OPTIONS}
 
 	frankenphp {
-		# Phase 8 flips this on without touching the image:
-		#   FRANKENPHP_CONFIG="worker ./public/frankenphp-worker.php"
+		# Worker mode arrives here from compose.yaml (Phase 8, ADR-008):
+		#   FRANKENPHP_CONFIG="worker /app/public/frankenphp-worker.php"
+		# An empty value serves classic mode from the same image — the A/B
+		# switch behind the before/after table in docs/load-tests.md.
 		{$FRANKENPHP_CONFIG}
 	}
 
@@ -26,6 +28,10 @@
 	encode zstd br gzip
 
 	php_server {
-		index index.php
+		# Registering the worker script (FRANKENPHP_CONFIG above) is only half
+		# of worker mode: FrankenPHP hands a request to the worker only when
+		# the request RESOLVES to the worker's file, so the index must switch
+		# with it. Classic mode (both vars empty) resolves to index.php.
+		index {$FRANKENPHP_INDEX:index.php}
 	}
 }

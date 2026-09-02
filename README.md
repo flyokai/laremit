@@ -355,8 +355,12 @@ docker/
 docs/
   adr/          architecture decision records
   tech-debt.md  deliberate shortcuts and their payoff triggers
+  load-tests.md every load run, with its methodology and caveats
+  capacity-model.md  the 10× sizing, from measured unit rates (Phase 8)
 load/
   k6-ingest.js  the 5k events/sec deliverable, as a script
+  *-p99.php     curl_multi harnesses: ingest, payments, entitlements —
+                the last one asserts response identity on every run
 ```
 
 Module boundaries are conventions today; Phase 7 adds architecture tests that
@@ -369,8 +373,16 @@ per-instance, and cache (evictable), queue (must never evict) and event stream
 (bounded by app-side trimming) need different answers. Full reasoning in
 [ADR-002](docs/adr/0002-redis-topology-and-eviction-policy.md).
 
-**FrankenPHP from day one.** Phase 8 enables Octane worker mode by setting
-`FRANKENPHP_CONFIG`, not by changing the app server.
+**FrankenPHP from day one — and Octane worker mode since Phase 8.** The app
+container serves worker mode by default (`FRANKENPHP_CONFIG` +
+`FRANKENPHP_INDEX` in compose.yaml); emptying both variables serves classic
+mode from the same image, which is the A/B switch behind the before/after
+table in [docs/load-tests.md](docs/load-tests.md). Two costs of the win,
+knowingly taken: code edits need `docker compose restart app` now, and
+request-scoped services must be bound `scoped()` — the audit, the planted
+leak, and the interleaved-user test that catches it are
+[ADR-008](docs/adr/0008-octane-adoption.md). The 10× sizing derived from the
+Phase 8 numbers is in [docs/capacity-model.md](docs/capacity-model.md).
 
 **MySQL runs `READ COMMITTED`.** The billing paths take short row locks, and
 REPEATABLE READ's gap locks turn concurrent charges for unrelated users into

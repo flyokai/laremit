@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Domain\Billing\Entitlements\Entitlements;
+use App\Http\Context\ActingUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -14,7 +15,7 @@ use Illuminate\Http\Request;
  */
 final class EntitlementController
 {
-    public function __invoke(Request $request, Entitlements $entitlements): JsonResponse
+    public function __invoke(Request $request, ActingUser $acting, Entitlements $entitlements): JsonResponse
     {
         /** @var array{user_id: int|string, product: string} $validated */
         $validated = $request->validate([
@@ -23,7 +24,11 @@ final class EntitlementController
         ]);
 
         // Query-string values validate as integers but arrive as strings.
-        $userId = (int) $validated['user_id'];
+        // The answer is computed for $acting->id(), not the raw input: the
+        // context object is what downstream layers would see, so it is the
+        // thing the interleaved-user leak test must observe (ADR-008).
+        $acting->actFor((int) $validated['user_id']);
+        $userId = $acting->id();
 
         return response()->json([
             'user_id' => $userId,

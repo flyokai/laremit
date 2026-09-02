@@ -9,6 +9,7 @@
         "php": "^8.4",
         "laravel/framework": "^13.8",
         "laravel/horizon": "^5.48",
+        "laravel/octane": "^2.19",
         "laravel/tinker": "^3.0"
     },
     "require-dev": {

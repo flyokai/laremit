@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Http\Context\ActingUser;
 use App\Support\Health\Checks\DatabaseCheck;
 use App\Support\Health\Checks\RedisCheck;
 use App\Support\Health\HealthChecker;
@@ -24,6 +25,19 @@ class AppServiceProvider extends ServiceProvider
             new RedisCheck('queue', 'noeviction'),
             new RedisCheck('stream', 'noeviction'),
         ]));
+
+        // Request state gets a scoped() binding, never singleton(): under
+        // Octane, scoped instances are flushed between requests even when
+        // resolved at worker boot; a singleton resolved at boot is shared by
+        // every request the worker ever serves (ADR-008). The demo flag
+        // recreates that bug on purpose — paired with the octane.warm entry
+        // in config/octane.php — so the interleaved-user test has something
+        // real to catch. It must never be set outside the demo.
+        if ((bool) config('octane.demo_cross_request_leak')) {
+            $this->app->singleton(ActingUser::class);
+        } else {
+            $this->app->scoped(ActingUser::class);
+        }
     }
 
     public function boot(): void
