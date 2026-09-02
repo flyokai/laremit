@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Domain\Billing\Exceptions\AlreadySubscribed;
+use App\Domain\Billing\Exceptions\PaymentInProgress;
 use App\Domain\Billing\Models\PaymentIntent;
 use App\Domain\Billing\Payments\CreatePaymentIntent;
 use App\Domain\Catalog\Models\Plan;
@@ -49,6 +50,14 @@ final class PaymentController
             $intent = $createIntent->execute($user, $plan);
         } catch (AlreadySubscribed) {
             return response()->json(['error' => 'already_subscribed'], 409);
+        } catch (PaymentInProgress $inProgress) {
+            // Another request's charge is in flight for this subscription.
+            // Hand back its intent id: the honest move is to poll that one,
+            // not to mint a rival charge.
+            return response()->json([
+                'error' => 'payment_in_progress',
+                'payment_intent_id' => $inProgress->paymentIntentId,
+            ], 409);
         }
 
         return response()->json([

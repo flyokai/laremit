@@ -10,6 +10,6 @@ pest()->extend(TestCase::class)
     ->in('Feature');
 
 pest()->extend(TestCase::class)
-    ->in('Unit');
+    ->in('Unit', 'Arch');
 
 require_once __DIR__.'/Feature/Support/pest-helpers.php';

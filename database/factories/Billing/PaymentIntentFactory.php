@@ -26,16 +26,19 @@ class PaymentIntentFactory extends Factory
     {
         return [
             'subscription_id' => Subscription::factory(),
-            // Derived from the subscription so user/plan/product agree.
+            // Derived from the subscription so user/plan/product agree. The
+            // int casts narrow findOrFail() to the single-model overload —
+            // by resolution time the attribute is always a key, never an
+            // array of them.
             'user_id' => fn (array $attributes) => Subscription::query()
-                ->findOrFail($attributes['subscription_id'])->user_id,
+                ->findOrFail((int) $attributes['subscription_id'])->user_id,
             'plan_id' => fn (array $attributes) => Subscription::query()
-                ->findOrFail($attributes['subscription_id'])->plan_id,
+                ->findOrFail((int) $attributes['subscription_id'])->plan_id,
             'purpose' => 'initial',
             'amount_minor' => fn (array $attributes) => Plan::query()
-                ->findOrFail($attributes['plan_id'])->amount_minor,
+                ->findOrFail((int) $attributes['plan_id'])->amount_minor,
             'currency' => fn (array $attributes) => Plan::query()
-                ->findOrFail($attributes['plan_id'])->currency,
+                ->findOrFail((int) $attributes['plan_id'])->currency,
             'status' => PaymentIntentStatus::Pending,
             'psp_idempotency_key' => (string) Str::ulid(),
         ];

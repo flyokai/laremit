@@ -21,7 +21,10 @@ class ProductFactory extends Factory
      */
     public function definition(): array
     {
-        $name = fake()->unique()->words(2, true);
+        // words(…, asText: true) always returns a string, but Faker types it
+        // array|string; the branch narrows without a cast.
+        $words = fake()->unique()->words(2, true);
+        $name = is_string($words) ? $words : implode(' ', $words);
 
         return [
             'slug' => Str::slug($name),

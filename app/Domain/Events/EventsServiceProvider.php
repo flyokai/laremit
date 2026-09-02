@@ -22,6 +22,7 @@ use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Support\ServiceProvider;
+use RuntimeException;
 
 /**
  * Wiring for the Events module. Everything the module needs from config is
@@ -34,6 +35,10 @@ final class EventsServiceProvider extends ServiceProvider
         $this->app->singleton(SchemaRegistry::class, function (Application $app): SchemaRegistry {
             /** @var list<int> $live */
             $live = (array) $app->make(Repository::class)->get('events.schema.live_versions');
+
+            if ($live === []) {
+                throw new RuntimeException('events.schema.live_versions must name at least one live version.');
+            }
 
             $registry = new SchemaRegistry($live);
 

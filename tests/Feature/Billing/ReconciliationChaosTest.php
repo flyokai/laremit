@@ -38,7 +38,7 @@ use Illuminate\Support\Facades\Queue;
  * Seeded like the Phase 3 chaos test, so a failure reproduces.
  */
 it('converges after dropping 20% of all webhooks, and reports how many discrepancies it fixed', function (): void {
-    mt_srand(20260829);
+    mt_srand(chaosSeed(20260829));
     Queue::fake([ChargeJob::class, DeliverPspWebhook::class, DeliverStoreNotification::class]);
 
     $product = Product::factory()->create(['slug' => 'edtech']);
@@ -254,4 +254,4 @@ it('converges after dropping 20% of all webhooks, and reports how many discrepan
 
     expect(Subscription::query()->whereIn('store', [Store::Apple->value, Store::Google->value])->count())
         ->toBe(StoreSubscription::query()->count());
-});
+})->group('chaos');

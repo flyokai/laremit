@@ -22,7 +22,7 @@ final class SchemaRegistry
     private array $upcasters = [];
 
     /**
-     * @param  list<int>  $liveVersions
+     * @param  non-empty-list<int>  $liveVersions
      */
     public function __construct(private readonly array $liveVersions) {}
 

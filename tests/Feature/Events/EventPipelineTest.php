@@ -162,7 +162,7 @@ it('survives a consumer killed mid-batch with no loss and no double-count', func
     expect(ArchivedEvent::query()->count())->toBe(10)
         ->and(ArchivedEvent::query()->distinct()->count('event_id'))->toBe(10)
         ->and($buffer->claimAbandoned('archive', 'worker-c', 0, 10))->toBeEmpty();
-});
+})->group('chaos');
 
 it('dead-letters an entry that cannot be decoded instead of blocking the group', function (): void {
     /** @var RedisEventStream $buffer */

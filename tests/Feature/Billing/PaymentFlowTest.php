@@ -94,6 +94,26 @@ it('refuses a second purchase while a granting subscription exists', function ()
         ->assertJsonPath('error', 'already_subscribed');
 });
 
+it('refuses a rival purchase while a charge is still in flight, naming the intent to poll', function (): void {
+    // Queue faked entirely: the first intent stays pending, exactly the
+    // window in which the Phase 7 parallel-purchase test caught five charges
+    // landing on one subscription.
+    Queue::fake();
+    $plan = flowPlan(1499);
+    $user = User::factory()->create();
+
+    $body = ['user_id' => $user->id, 'product' => $plan->product->slug, 'plan' => $plan->slug];
+
+    $first = $this->postJson('/v1/payments', $body, flowHeaders())->assertStatus(202);
+
+    $this->postJson('/v1/payments', $body, flowHeaders())
+        ->assertStatus(409)
+        ->assertJsonPath('error', 'payment_in_progress')
+        ->assertJsonPath('payment_intent_id', $first->json('payment_intent_id'));
+
+    expect(PaymentIntent::query()->where('user_id', $user->id)->count())->toBe(1);
+});
+
 it('resubscribes after cancel on the same subscription row', function (): void {
     Queue::fake([DeliverPspWebhook::class]);
     $plan = flowPlan(1499);

@@ -7,6 +7,7 @@ namespace App\Domain\Billing\Payments;
 use App\Domain\Billing\Enums\PaymentIntentStatus;
 use App\Domain\Billing\Enums\SubscriptionStatus;
 use App\Domain\Billing\Exceptions\AlreadySubscribed;
+use App\Domain\Billing\Exceptions\PaymentInProgress;
 use App\Domain\Billing\Jobs\ChargeJob;
 use App\Domain\Billing\Models\PaymentIntent;
 use App\Domain\Billing\Models\Subscription;
@@ -33,6 +34,15 @@ final readonly class CreatePaymentIntent
     public function execute(User $user, Plan $plan): PaymentIntent
     {
         return DB::transaction(function () use ($user, $plan): PaymentIntent {
+            // The serialization anchor. The subscription row this purchase
+            // is about may not exist yet, and a FOR UPDATE that matches no
+            // row gives rivals nothing they must wait behind — under load,
+            // two first-purchases both saw "no subscription" and BOTH
+            // charged (caught by the Phase 7 parallel test: two active rows,
+            // two charges, one user). The user row always exists, so every
+            // purchase for this user queues here in a total order.
+            User::query()->whereKey($user->id)->lockForUpdate()->first();
+
             $subscription = Subscription::query()
                 ->where('user_id', $user->id)
                 ->where('product_id', $plan->product_id)
@@ -52,6 +62,27 @@ final readonly class CreatePaymentIntent
                 throw new AlreadySubscribed(
                     "User {$user->id} still has access to product {$plan->product_id}."
                 );
+            }
+
+            // A rechargeable subscription may still carry an in-flight
+            // intent: another request created it and its charge is pending,
+            // processing, or ambiguous. The row lock above makes this check
+            // race-free — a rival either waits behind us or sees our intent.
+            // Without it, 20 parallel purchases with distinct idempotency
+            // keys produced ONE subscription and FIVE settled charges.
+            if ($subscription !== null) {
+                $inFlight = PaymentIntent::query()
+                    ->where('subscription_id', $subscription->id)
+                    ->whereIn('status', [PaymentIntentStatus::Pending, PaymentIntentStatus::Processing])
+                    ->orderByDesc('id')
+                    ->first();
+
+                if ($inFlight !== null) {
+                    throw new PaymentInProgress(
+                        $inFlight->id,
+                        "Payment intent {$inFlight->id} for subscription {$subscription->id} is still {$inFlight->status->value}."
+                    );
+                }
             }
 
             if ($subscription === null || $subscription->status === SubscriptionStatus::Expired) {

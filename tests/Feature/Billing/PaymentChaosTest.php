@@ -29,7 +29,7 @@ use Illuminate\Support\Facades\Queue;
  * so a failure reproduces.
  */
 it('keeps the ledger exactly correct through timeouts, duplicates and reordering', function (): void {
-    mt_srand(20260826);
+    mt_srand(chaosSeed(20260826));
     Queue::fake([ChargeJob::class, DeliverPspWebhook::class]);
 
     $product = Product::factory()->create();
@@ -138,4 +138,4 @@ it('keeps the ledger exactly correct through timeouts, duplicates and reordering
         expect((int) $transaction->n)->toBe(2)
             ->and((int) $transaction->s)->toBe(0);
     }
-});
+})->group('chaos');

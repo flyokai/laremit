@@ -173,3 +173,22 @@ function drainStoreNotifications(?callable $reorder = null): array
 
     return $responses;
 }
+
+/**
+ * Chaos seed: deterministic by default so the fast pipeline never flakes and
+ * a failure reproduces byte for byte. The nightly roulette overrides it via
+ * CHAOS_SEED to walk fresh orderings — the invariants under test must hold
+ * for EVERY seed, so a red nightly is a real bug, and this prints the seed
+ * that found it.
+ */
+function chaosSeed(int $default): int
+{
+    $override = getenv('CHAOS_SEED');
+    $seed = ($override === false || $override === '') ? $default : (int) $override;
+
+    if ($seed !== $default) {
+        fwrite(STDERR, "\nCHAOS_SEED={$seed} (default {$default}) — export it to reproduce this run.\n");
+    }
+
+    return $seed;
+}

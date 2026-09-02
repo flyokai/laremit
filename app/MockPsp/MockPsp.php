@@ -140,9 +140,9 @@ final readonly class MockPsp
             ->get()
             ->groupBy('charge_id');
 
-        return $charges
-            ->map(fn (PspCharge $charge): array => $this->describe($charge, $refunds->get($charge->charge_id, collect())->all()))
-            ->all();
+        return array_values($charges
+            ->map(fn (PspCharge $charge): array => $this->describe($charge, array_values($refunds->get($charge->charge_id)?->all() ?? [])))
+            ->all());
     }
 
     /**
@@ -159,7 +159,7 @@ final readonly class MockPsp
             return null;
         }
 
-        return $this->describe($charge, PspRefund::query()->where('charge_id', $charge->charge_id)->orderBy('id')->get()->all());
+        return $this->describe($charge, array_values(PspRefund::query()->where('charge_id', $charge->charge_id)->orderBy('id')->get()->all()));
     }
 
     /**

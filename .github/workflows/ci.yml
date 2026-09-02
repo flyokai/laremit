@@ -1,0 +1,129 @@
+# The fast pipeline (Module 9): every push gets the whole truth in a few
+# minutes — lint, static analysis at level 7, and the full suite including
+# the chaos group (deterministic seed) and the real-parallelism concurrency
+# group against a real MySQL. What does NOT run here: the suite against
+# MySQL as the default connection, and chaos with randomized seeds — those
+# are nightly's job (nightly.yml), because a pipeline that is slow or flaky
+# on push is a pipeline people learn to ignore.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ hashFiles('composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: ./vendor/bin/pint --test
+
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ hashFiles('composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: ./vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports: ['33100:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis-cache:
+        image: redis:8-alpine
+        ports: ['6301:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis-queue:
+        image: redis:8-alpine
+        ports: ['6302:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis-stream:
+        image: redis:8-alpine
+        ports: ['6303:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: redis, pdo_mysql, pdo_sqlite
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ hashFiles('composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      # The suite reads its own config from phpunit.xml; .env exists for the
+      # processes the concurrency harness spawns, which boot the app for real.
+      - run: cp .env.example .env && php artisan key:generate
+      - run: ./vendor/bin/pest --compact
+
+  # The chaos deliverable, visible as its own line in every run: duplicated,
+  # reordered and dropped webhooks against an exactly-correct ledger, plus
+  # the consumer-kill and relay-kill recovery proofs. Deterministic seed
+  # here; the nightly roulette walks fresh ones.
+  chaos:
+    runs-on: ubuntu-latest
+    services:
+      redis-cache:
+        image: redis:8-alpine
+        ports: ['6301:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis-stream:
+        image: redis:8-alpine
+        ports: ['6303:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: redis, pdo_sqlite
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ hashFiles('composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: ./vendor/bin/pest --group=chaos --compact
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+      - run: composer audit

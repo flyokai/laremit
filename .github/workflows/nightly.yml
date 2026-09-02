@@ -1,0 +1,116 @@
+# The slow, adversarial half of the split (Module 9): everything too heavy
+# or deliberately non-deterministic for the push pipeline. Red here is a real
+# bug found overnight, not noise — the first run of the MySQL job caught a
+# VARCHAR too short for Google's own status vocabulary, a JSON column
+# reordering the mock PSP's byte-for-byte replays, and second-precision
+# rounding that made half of all grace-period notifications look stale.
+
+name: nightly
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  # The whole suite with MySQL as the DEFAULT connection — partitions,
+  # SKIP LOCKED, strict-mode truncation, fractional-second rounding and JSON
+  # column semantics all run for real (tech-debt #2). phpunit.xml's env
+  # entries are non-forced, so the job-level environment wins.
+  mysql-suite:
+    runs-on: ubuntu-latest
+    env:
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '33100'
+      DB_DATABASE: laremit_nightly
+      DB_USERNAME: root
+      DB_PASSWORD: root
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: laremit_nightly
+        ports: ['33100:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis-cache:
+        image: redis:8-alpine
+        ports: ['6301:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis-queue:
+        image: redis:8-alpine
+        ports: ['6302:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis-stream:
+        image: redis:8-alpine
+        ports: ['6303:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: redis, pdo_mysql, pdo_sqlite
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ hashFiles('composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: cp .env.example .env && php artisan key:generate
+      - run: ./vendor/bin/pest --compact
+
+  # Chaos with seeds nobody chose: the invariants must hold for EVERY
+  # ordering of duplicated/dropped/reordered deliveries, so each night walks
+  # five fresh ones. A failure prints the seed; export CHAOS_SEED locally to
+  # replay it byte for byte.
+  chaos-roulette:
+    runs-on: ubuntu-latest
+    services:
+      redis-cache:
+        image: redis:8-alpine
+        ports: ['6301:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis-stream:
+        image: redis:8-alpine
+        ports: ['6303:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: redis, pdo_sqlite
+          coverage: none
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ hashFiles('composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - name: chaos x5 with run-derived seeds
+        run: |
+          base=$(( ${{ github.run_id }} % 900000 ))
+          for i in 1 2 3 4 5; do
+            seed=$(( base + i ))
+            echo "::group::CHAOS_SEED=$seed"
+            CHAOS_SEED=$seed ./vendor/bin/pest --group=chaos --compact
+            echo "::endgroup::"
+          done
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+      - run: composer audit

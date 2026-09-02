@@ -52,7 +52,7 @@ it('absorbs a relay killed between publish and mark-dispatched', function (): vo
     expect($result)->toMatchArray(['claimed' => 5, 'dispatched' => 5, 'duplicates' => 5, 'dead' => 0])
         ->and(count($this->buffer->appended))->toBe(5)
         ->and(OutboxMessage::query()->whereNull('dispatched_at')->count())->toBe(0);
-});
+})->group('chaos');
 
 it('keeps effects exactly-once even when the stream carries duplicates and consumers are redelivered', function (): void {
     publishChaosFacts();
@@ -85,4 +85,4 @@ it('keeps effects exactly-once even when the stream carries duplicates and consu
         ->and(BillingMetric::valueFor($today, 'cancellations'))->toBe(1)
         ->and(BillingMetric::valueFor($today, 'payments_succeeded'))->toBe(1)
         ->and(BillingMetric::valueFor($today, 'payments_failed'))->toBe(1);
-});
+})->group('chaos');

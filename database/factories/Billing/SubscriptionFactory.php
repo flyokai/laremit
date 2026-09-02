@@ -32,7 +32,7 @@ class SubscriptionFactory extends Factory
             'plan_id' => Plan::factory(),
             // Derived from the plan so the two can never disagree.
             'product_id' => fn (array $attributes) => Plan::query()
-                ->findOrFail($attributes['plan_id'])
+                ->findOrFail((int) $attributes['plan_id'])
                 ->product_id,
             'status' => SubscriptionStatus::Active,
             'store' => Store::Psp,

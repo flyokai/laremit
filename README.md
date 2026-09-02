@@ -15,6 +15,17 @@ deliberate shortcut is in [`docs/tech-debt.md`](docs/tech-debt.md).
 
 ## Status
 
+**Phase 7 — Testing & quality.** Larastan at level 7 with no baseline; an
+architecture suite (`tests/Arch`) that fails the build on boundary
+violations; query-count budgets on the hot endpoints (ingest is provably
+zero DB queries at any batch size); the chaos tests as first-class CI jobs
+with env-overridable seeds; and a real-parallelism concurrency suite — 20
+simultaneous HTTP requests against a served app on MySQL → exactly one
+charge — which found and fixed a genuine double-charge race on first run
+(five settled charges on one subscription; see docs/ci.md). CI splits
+fast-on-push from adversarial-nightly: the nightly MySQL suite caught three
+MySQL-only schema bugs the day it was born. Earlier: Phase 4 below.
+
 **Phase 4 — Webhooks, reconciliation, IAP.** The webhook edge rebuilt as
 verify → persist raw → 200 → queue, with a signed-timestamp tolerance and a
 provider-event-id unique key; refunds and revocation; stale-transition
@@ -304,13 +315,22 @@ mid-batch".
 ## Development
 
 ```bash
-composer check      # pint --test, phpstan level 6, pest
+composer check      # pint --test, phpstan level 7, pest
 composer lint:fix   # pint
+
+./vendor/bin/pest --group=chaos         # the chaos proofs alone
+CHAOS_SEED=12345 ./vendor/bin/pest --group=chaos   # replay a nightly seed
+./vendor/bin/pest --group=concurrency   # 20 parallel requests, one charge
 ```
 
 Tests run against SQLite in-memory. The event pipeline integration tests
 additionally use the stream/cache Redis containers (database 9, test key
-prefix — never development data) and skip themselves when the stack is down.
+prefix — never development data) and skip themselves when the stack is down;
+the concurrency suite likewise boots its own served app against a throwaway
+MySQL database (`laremit_concurrency`) and skips when MySQL is unreachable.
+The nightly CI job runs the entire suite with MySQL as the default
+connection. The split, the measured times, and what each tier has caught:
+docs/ci.md.
 
 ## Layout
 
